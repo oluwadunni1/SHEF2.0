@@ -1,0 +1,29 @@
+schema: '2.0'
+stages:
+  build_clean:
+    cmd: uv run python scripts/build_clean.py
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: 024fd459aeb31852a5edc28f075f9c6c.dir
+      size: 5839437
+      nfiles: 29
+    - path: scripts/build_clean.py
+      hash: md5
+      md5: 5f02ee763601b8a4c130d53c8c7f9358
+      size: 1511
+    - path: src/shef
+      hash: md5
+      md5: b1bd10d53b5fea92e061ec623adf5d1f.dir
+      size: 81552
+      nfiles: 24
+    outs:
+    - path: data/clean
+      hash: md5
+      md5: c64fb84c8976f43f04af96b5f3e93b4e.dir
+      size: 12199971
+      nfiles: 41
+    - path: data/reports/validation_joined.json
+      hash: md5
+      md5: 42804b84fa539b61853c5791c9e24970
+      size: 998

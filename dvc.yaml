@@ -1,0 +1,14 @@
+# data/raw is added with `dvc add` (API pulls can't be reproduced exactly).
+# Everything downstream of it is a stage, so `dvc repro` rebuilds it.
+stages:
+  build_clean:
+    cmd: uv run python scripts/build_clean.py
+    deps:
+      - scripts/build_clean.py
+      - src/shef
+      - data/raw
+    outs:
+      - data/clean
+    metrics:
+      - data/reports/validation_joined.json:
+          cache: false

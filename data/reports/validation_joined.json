@@ -1,0 +1,39 @@
+{
+  "stage": "joined",
+  "schema": "joined",
+  "checked_at_utc": "2026-10-11T22:24:53+00:00",
+  "rows": 94485,
+  "passed": true,
+  "failures": [],
+  "warnings": [],
+  "stats": {
+    "first_ts_utc": "2016-01-01 00:00:00+00:00",
+    "last_ts_utc": "2026-10-11 20:00:00+00:00",
+    "load_gaps": [
+      {
+        "after": "2016-03-16 03:00:00+00:00",
+        "before": "2016-03-16 05:00:00+00:00",
+        "missing_hours": 1
+      }
+    ],
+    "load_completeness_by_year": {
+      "2016": 0.99989,
+      "2017": 1.0,
+      "2018": 1.0,
+      "2019": 1.0,
+      "2020": 1.0,
+      "2021": 1.0,
+      "2022": 1.0,
+      "2023": 1.0,
+      "2024": 1.0,
+      "2025": 1.0,
+      "2026": 1.0
+    },
+    "temp_obs_missing_hours_older_than_7d": 0,
+    "temp_obs_last_valid_utc": "2026-10-11 20:00:00+00:00",
+    "temp_proxy_d1_completeness_since_start": 0.98989,
+    "temp_proxy_d2_completeness_since_start": 0.98893,
+    "uri_hours": 264,
+    "dst_day_hours": 503
+  }
+}

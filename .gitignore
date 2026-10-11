@@ -15,5 +15,9 @@ wheels/
 # Audit raw pulls (regeneratable)
 audit/cache/
 
-# Pipeline data (regeneratable from sources)
-data/
+# Pipeline data: data/raw and data/clean are versioned by DVC (see dvc.yaml).
+# Caches and per-run logs are not versioned at all.
+data/cache/
+data/reports/*.log
+data/reports/validation_raw_*.json
+data/reports/validation_clean_*.json
