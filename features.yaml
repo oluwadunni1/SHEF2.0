@@ -1,0 +1,126 @@
+# features.yaml — the availability contract.
+#
+# Every model input is listed here with where it comes from and the latest
+# source timestamp it may read, relative to the forecast's issue_time or
+# target_time. The feature builder (P2) reads this file, and the leakage test
+# fails if any feature reads data later than its `reads_up_to`.
+#
+# Rule: a feature is allowed only if source_time + publish_latency <= issue_time.
+#
+# Day-ahead: issue_time = 10:00 America/Chicago on D-1, targets = hours 00..23 of D,
+# so lead time (target - issue) runs from 14h to 38h.
+
+issue:
+  # LOCKED 2026-10-11. 10:00 Central local time all year = ERCOT day-ahead
+  # market close. GitHub cron is UTC-only, so the workflow schedules both
+  # 15:00 UTC (CDT) and 16:00 UTC (CST) and proceeds only on the run where
+  # local time is 10:xx. Training replay uses the same local-time rule.
+  mode: day_ahead
+  issue_time_local: "10:00"
+  timezone: America/Chicago
+  dst_rule: fixed_local_time
+  cron_utc: ["0 15 * * *", "0 16 * * *"]
+  target_day_offset: 1
+  lead_hours: [14, 38]
+
+latency:
+  # PROVISIONAL (2026-10-11): one measured interval, published 22-27 min after
+  # it ended; another was already visible <= 56 min after. 1h gives ~2x margin.
+  # Replace with the p99 (rounded up to the hour) from a multi-day probe.
+  gridstatus_load_hours: 1
+  # Open-Meteo runs are on the forecast API within a few hours of model init;
+  # we read whatever the latest run is at issue_time and record its run time.
+  weather_forecast: latest_run_at_issue
+
+sources:
+  calendar:     {kind: deterministic}
+  load:         {kind: observed, provider: gridstatus, dataset: ercot_load_by_weather_zone, column: south_central}
+  weather_obs:  {kind: observed, provider: open-meteo archive (ERA5), note: "training history and pre-issue hours"}
+  weather_fc:   {kind: forecast, provider: open-meteo forecast, training_proxy: previous-runs API *_previous_day1}
+  bundle:       {kind: fitted_on_train, note: "thresholds, holiday_freq_map, trend_idx_origin"}
+
+# reads_up_to:
+#   target        value at the target hour (allowed only for deterministic or forecast sources)
+#   issue         latest value at or before issue_time
+#   issue-latency latest value at or before issue_time - publish latency
+#   target-Nh     the value N hours before the target (must still satisfy the rule)
+features:
+  # --- calendar -------------------------------------------------------------
+  - {name: hour,          source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: dayofweek,     source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: month,         source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead], note: "paper saw month drag peaks down; check with SHAP"}
+  - {name: is_weekend,    source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: is_monday,     source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: hour_sin,      source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: hour_cos,      source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: dow_sin,       source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: dow_cos,       source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: is_holiday,    source: calendar, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: holiday_freq,  source: bundle,   reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: trend_idx,     source: bundle,   reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: lead_hours,    source: calendar, reads_up_to: target, modes: [day_ahead], note: "target - issue_time, 14..38; lets the model weigh stale inputs"}
+
+  # --- weather at the target hour (forecast at serve time) --------------------
+  - {name: temp_c,        source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead], training_proxy_from: "2021-03-24"}
+  - {name: humidity_pct,  source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead], training_proxy_from: "2024-01-19", note: "forecast MAE 7.7 pts, biased low"}
+  - {name: precip_mm,     source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead], training_proxy_from: "2024-01-19", note: "low skill; candidate to drop"}
+  - {name: tmax,          source: weather_fc, reads_up_to: target, modes: [day_ahead], note: "max over target's Central day"}
+  - {name: tmin,          source: weather_fc, reads_up_to: target, modes: [day_ahead]}
+  - {name: tavg,          source: weather_fc, reads_up_to: target, modes: [day_ahead]}
+  - {name: cdd,           source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead], formula: "max(0, tavg - 18.3)"}
+  - {name: hdd,           source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead], formula: "max(0, 18.3 - tavg)"}
+  - {name: cdd_x_hour,    source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: hour_x_temp,   source: weather_fc, reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: temp_spike_vs_mean, source: weather_fc, reads_up_to: target, modes: [day_ahead], formula: "(tmax - tavg) / (tavg + 1)"}
+  - {name: is_extreme_heat_event, source: [weather_fc, bundle], reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: is_extreme_cold_event, source: [weather_fc, bundle], reads_up_to: target, modes: [day_ahead, hour_ahead]}
+
+  # --- weather windows that straddle issue_time (observed before, forecast after)
+  - {name: tmax_roll_max_72,   source: [weather_obs, weather_fc], reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: temp_c_roll_std_72, source: [weather_obs, weather_fc], reads_up_to: target, modes: [day_ahead, hour_ahead]}
+  - {name: tavg_lag_24,        source: [weather_obs, weather_fc], reads_up_to: target-24h, modes: [day_ahead, hour_ahead]}
+  - {name: tmax_lag_24,        source: [weather_obs, weather_fc], reads_up_to: target-24h, modes: [day_ahead, hour_ahead]}
+  - {name: tmin_lag_24,        source: [weather_obs, weather_fc], reads_up_to: target-24h, modes: [day_ahead, hour_ahead]}
+
+  # --- load history ---------------------------------------------------------
+  # cutoff = issue_time - latency.gridstatus_load_hours. An hourly interval is
+  # usable only if interval_end <= cutoff. The cutoff comes from the fixed
+  # latency, never from whatever data happens to be present, so serving never
+  # sees fresher data than training did.
+
+  # Same clock hour, freshest legal copy. With latency 1h: targets 00-08 of D
+  # get D-1 (age 24), targets 09-23 get D-2 (age 48).
+  - name: load_same_hour_latest
+    source: load
+    reads_up_to: issue-latency
+    modes: [day_ahead]
+    rule: "first of target-24h, -48h, -72h whose interval_end <= cutoff"
+    serve_fallback: "if expected value is missing (GridStatus late), step to the next age and record it in the gate report"
+    train_augmentation: "apply the fallback to ~5% of age-24 rows so the model has seen it"
+  - {name: same_hour_age_h, source: load, reads_up_to: issue-latency, modes: [day_ahead], note: "24 or 48 (72 only on fallback)"}
+
+  # Fixed lags, valid for every target hour.
+  - {name: load_lag_48,     source: load, reads_up_to: target-48h,  modes: [day_ahead, hour_ahead], note: "min legal fixed lag for day-ahead is 38h + latency"}
+  - {name: lag_48_x_hour,   source: load, reads_up_to: target-48h,  modes: [day_ahead, hour_ahead]}
+  - {name: load_lag_168,    source: load, reads_up_to: target-168h, modes: [day_ahead, hour_ahead]}
+
+  # Issue-time anchors: computed once per issue_time, identical for all 24 targets.
+  - {name: last_known_load,          source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead], note: "newest published hour, e.g. D-1 08:00"}
+  - {name: dminus1_vs_lastweek,      source: load, reads_up_to: issue-latency, modes: [day_ahead], formula: "sum(D-1 hours <= cutoff) / sum(same hours, D-8)"}
+  - {name: dminus1_vs_dminus2,       source: load, reads_up_to: issue-latency, modes: [day_ahead], formula: "sum(D-1 hours <= cutoff) / sum(same hours, D-2)"}
+  - {name: last_known_roll_mean_24,  source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead]}
+  - {name: last_known_roll_max_24,   source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead]}
+  - {name: last_known_roll_std_24,   source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead]}
+  - {name: last_known_roll_mean_168, source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead]}
+
+  # Hour-ahead only.
+  - {name: load_lag_24,     source: load, reads_up_to: target-24h,  modes: [hour_ahead], note: "day-ahead uses load_same_hour_latest instead"}
+  - {name: load_lag_1,      source: load, reads_up_to: target-1h,   modes: [], note: "enable for hour_ahead only if gridstatus latency < 1h"}
+
+# Alternatives to benchmark in P3 against the default set above.
+experiments:
+  - {name: masked_lag_24, replaces: [load_same_hour_latest, same_hour_age_h], rule: "D-1 same hour if interval_end <= cutoff, else NaN (trees handle NaN natively)"}
+  - {name: split_models,  rule: "one model for targets whose same_hour_age_h == 24, one for the rest; adopt only if it clearly wins on peak-MAPE"}
+
+excluded:
+  - {name: load_spike_vs_mean, reason: "paper feature; uses the target hour's own load"}
