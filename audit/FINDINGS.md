@@ -48,7 +48,44 @@ Source: `gridstatus_latency.py`.
   - `features.yaml` uses **1 h** as a provisional delay, about twice the observed one. Day-ahead targets 00–08 get yesterday's same-hour load.
   - Re-run `gridstatus_latency.py probe --loop 300` over a few days to get a p99 before P2's leakage test treats the number as final.
 
-## 3. Still open
+## 3. P1 data layer (2026-10-11)
+
+Built by `scripts/backfill.py` then `scripts/build_clean.py`. Every stage passes a Pandera gate. The reports are in `data/reports/validation_*.json`.
+
+**One time key.** `ts_utc` is the UTC start of the hour a value describes.
+- Load: `ts_utc = interval_start_utc`.
+- Open-Meteo: `ts_utc = time − 1h`. The docs label temperature and humidity "Instant" and precipitation "Preceding hour sum". So every weather value on a row describes that row's load interval. v1 joined `time` directly to `interval_start`, which put precipitation one hour early.
+
+| Table | Rows | Range (UTC) | Notes |
+|---|---|---|---|
+| load | 94,484 | 2016-01-01 00:00 → 2026-10-11 20:00 | 1 missing hour (2016-03-16 04:00 UTC); every other year 100% |
+| weather_obs (ERA5, 4 cities) | 377k | 2016 → now | 0 missing hours older than 7 days |
+| weather_fc_proxy (`previous_day1/2`) | 202k | temp from 2021-03-24 | day1 99.0%, day2 98.9% complete since start |
+| joined | 94,485 | one row per hour | the gap is an explicit row with `is_load_gap` |
+
+**Spot checks:**
+- **Load range:** 3,772 to 16,113 MW. The maximum was 2026-08-27 15:00 CDT.
+- **Summer daily cycle (Jul–Aug 2025, Central hours):** temperature peaks at 15:00 and load at 17:00. Load bottoms out at 04:00 and temperature at 06:00. Hourly correlation is 0.91. A timezone mix-up would shift these by 5–6 h.
+- **Fall-back night:** the two 01:00 Central hours on 2025-11-02 are separate UTC rows, with no duplicate and no gap.
+- **Uri (Feb 10–20, 2021; 264 flagged hours):**
+  - Load rose with the cold, from about 5.8 GW to 11.7 GW on the 14th.
+  - It then dropped to 8.4–8.9 GW on the 16th–17th even though the low was −13 °C. That's the load shedding.
+  - The flag covers the whole event. Whether to exclude it or down-weight it is a P3 decision.
+
+**Source glitch caught by the gate.** San Marcos `precipitation_previous_day1` showed 171 mm at 2026-05-20 07:00 UTC, while ERA5 had 8.6 mm and day 2 had 0.0. Precipitation above 100 mm/h is now quarantined: set to NaN and listed in the report.
+
+**Live forecast archive** (`data/raw/weather_fc_live`):
+- `scripts/snapshot_forecast.py` stores what we would serve: 3 past days plus 3 forecast days, all four cities.
+- The first snapshot was taken 2026-10-11 16:59 CDT. That's a test, not issue-time.
+- Two Windows tasks (16:00 and 17:00 WAT, which is 15:00 and 16:00 UTC) run `scripts/snapshot_forecast.cmd`. `--only-at-issue` keeps only the run at 10:xx Central.
+- Running the wrapper by hand works. Whether the task-launched run writes its log is **unverified**: check `data/reports/snapshot_forecast.log` after the first scheduled run.
+
+**Raised for P2:**
+- At serve time, ERA5 does not yet have the last ~5 days.
+- The Open-Meteo archive still returned values up to the current hour. Those recent values are model output, not reanalysis, and they get revised. That's why ranges ending within 10 days are never cached.
+- So the observed half of the windows that straddle issue time (`tmax_roll_max_72`, `*_lag_24`) must come from what is available at 10:00 CT, meaning the forecast API's `past_days`. Training must replay the same source, not ERA5.
+
+## 4. Still open
 
 - [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
 - [ ] Hour-ahead go / no-go: a ~25 min delay makes it technically possible, but one sample is not enough. Parked as optional P7.

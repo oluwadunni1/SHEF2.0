@@ -1,12 +1,31 @@
 [project]
 name = "shef2-0"
 version = "0.1.0"
-description = "Add your description here"
+description = "Day-ahead hourly load forecast for ERCOT South Central"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "gridstatusio>=0.16.0",
+    "holidays>=0.106",
     "pandas>=3.0.6",
+    "pandera[pandas]>=0.34.1",
+    "pyarrow>=26.0.0",
     "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.3",
     "requests>=2.34.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "shef"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

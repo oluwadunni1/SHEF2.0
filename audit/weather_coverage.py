@@ -26,77 +26,25 @@ from __future__ import annotations
 
 import argparse
 import json
-import time
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import requests
 
-CITY_COORDS = {
-    "san_antonio": {"lat": 29.4241, "lon": -98.4936},
-    "austin":      {"lat": 30.2672, "lon": -97.7431},
-    "round_rock":  {"lat": 30.5083, "lon": -97.6789},
-    "san_marcos":  {"lat": 29.8833, "lon": -97.9414},
-}
-VARS = ["temperature_2m", "relative_humidity_2m", "precipitation"]
-LEADS = ["previous_day1", "previous_day2"]
+from shef.config import CITY_COORDS, FORECAST_LEADS, WEATHER_VARS
+from shef.sources import openmeteo
 
-URLS = {
-    "archive": "https://archive-api.open-meteo.com/v1/archive",
-    "historical_fc": "https://historical-forecast-api.open-meteo.com/v1/forecast",
-    "previous_runs": "https://previous-runs-api.open-meteo.com/v1/forecast",
-}
+VARS = list(WEATHER_VARS)
+LEADS = list(FORECAST_LEADS)
+SOURCES = ["archive", "historical_fc", "previous_runs"]
 
 ROOT = Path(__file__).resolve().parent
 CACHE = ROOT / "cache" / "weather"
 REPORTS = ROOT / "reports"
 
 
-def _hourly_vars(source: str) -> list[str]:
-    if source == "previous_runs":
-        return [f"{v}_{lead}" for v in VARS for lead in LEADS]
-    return VARS
-
-
 def fetch(source: str, city: str, start: date, end: date) -> pd.DataFrame:
-    """One city, one source, one date range. Cached on disk as JSON."""
-    CACHE.mkdir(parents=True, exist_ok=True)
-    cache_file = CACHE / f"{source}_{city}_{start}_{end}.json"
-    if cache_file.exists():
-        payload = json.loads(cache_file.read_text())
-    else:
-        coords = CITY_COORDS[city]
-        params = {
-            "latitude": coords["lat"],
-            "longitude": coords["lon"],
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-            "hourly": ",".join(_hourly_vars(source)),
-            "timezone": "UTC",
-        }
-        for attempt in range(4):
-            resp = requests.get(URLS[source], params=params, timeout=120)
-            if resp.status_code == 429:
-                time.sleep(30 * (attempt + 1))
-                continue
-            break
-        if resp.status_code != 200:
-            # A range the API does not serve at all comes back as 400 — record it
-            # as empty coverage rather than failing the whole audit.
-            print(f"  {source} {city} {start}..{end}: HTTP {resp.status_code} {resp.text[:160]}")
-            return pd.DataFrame()
-        payload = resp.json()
-        cache_file.write_text(json.dumps(payload))
-
-    hourly = payload.get("hourly", {})
-    if "time" not in hourly:
-        return pd.DataFrame()
-    df = pd.DataFrame(hourly)
-    df["time"] = pd.to_datetime(df["time"], utc=True)
-    df["city"] = city
-    df["source"] = source
-    return df
+    return openmeteo.fetch(source, city, start, end, cache_dirs=[CACHE])
 
 
 def coverage_table(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -157,11 +105,11 @@ def main() -> None:
     args = parser.parse_args()
 
     today = date.today()
-    frames: dict[str, list[pd.DataFrame]] = {s: [] for s in URLS}
+    frames: dict[str, list[pd.DataFrame]] = {s: [] for s in SOURCES}
     for year in range(args.start_year, args.end_year + 1):
         start = date(year, 1, 1)
         end = min(date(year, 12, 31), today)
-        for source in URLS:
+        for source in SOURCES:
             for city in CITY_COORDS:
                 print(f"{year} {source:14s} {city}")
                 frames[source].append(fetch(source, city, start, end))

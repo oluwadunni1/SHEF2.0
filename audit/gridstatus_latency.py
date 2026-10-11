@@ -29,31 +29,20 @@ USAGE
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
 
 import pandas as pd
-from dotenv import load_dotenv
 
-DATASET = "ercot_load_by_weather_zone"
-LOAD_COLUMN = "south_central"
+from shef.sources.gridstatus import DATASET, LOAD_COLUMN
+from shef.sources.gridstatus import client as _client
+
 LOOKBACK_HOURS = 6
 
 ROOT = Path(__file__).resolve().parent
 PROBE_LOG = ROOT / "data" / "gridstatus_probe.csv"
 REPORTS = ROOT / "reports"
-
-
-def _client():
-    from gridstatusio import GridStatusClient
-
-    load_dotenv(ROOT.parent / ".env")
-    api_key = os.environ.get("GRIDSTATUS_API_KEY")
-    if not api_key:
-        sys.exit("GRIDSTATUS_API_KEY is not set. Add it to SHEF2.0/.env and rerun.")
-    return GridStatusClient(api_key=api_key)
 
 
 def _recent(client, hours: int) -> pd.DataFrame:
