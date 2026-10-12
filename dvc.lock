@@ -12,11 +12,38 @@ stages:
       hash: md5
       md5: 5f02ee763601b8a4c130d53c8c7f9358
       size: 1511
-    - path: src/shef
+    - path: src/shef/align.py
       hash: md5
-      md5: b1bd10d53b5fea92e061ec623adf5d1f.dir
-      size: 81552
-      nfiles: 24
+      md5: c05652761345dc47c6c844fa27913734
+      size: 2743
+    - path: src/shef/build.py
+      hash: md5
+      md5: a3d2ffac3013e2ffed1d03939d246c90
+      size: 5718
+    - path: src/shef/config.py
+      hash: md5
+      md5: 39f73ce95b3b0e8540a3252ce75ce7ed
+      size: 1515
+    - path: src/shef/schemas.py
+      hash: md5
+      md5: 45f9dd352b398c7022f185b07a06cc64
+      size: 4487
+    - path: src/shef/store.py
+      hash: md5
+      md5: 76322e61d4dcfdfc8781192bdc3d6948
+      size: 1776
+    - path: src/shef/timestamps.py
+      hash: md5
+      md5: 467a81ef6c2e880ed650246f582b27b7
+      size: 2492
+    - path: src/shef/validate.py
+      hash: md5
+      md5: 26407d5998e32824fd626d1fae149ba0
+      size: 2469
+    - path: src/shef/weather_weights.py
+      hash: md5
+      md5: 770451e6b791703151e9b6b69f341f32
+      size: 2138
     outs:
     - path: data/clean
       hash: md5
@@ -25,5 +52,91 @@ stages:
       nfiles: 41
     - path: data/reports/validation_joined.json
       hash: md5
-      md5: 42804b84fa539b61853c5791c9e24970
+      md5: 26b873da062da4a6fec9915d208ff63b
       size: 998
+  features@obs:
+    cmd: uv run python scripts/build_features.py --mode obs
+    deps:
+    - path: data/clean/joined
+      hash: md5
+      md5: a53ef8b31eb69e6d6308d4edf9d1ecee.dir
+      size: 4499436
+      nfiles: 11
+    - path: features.yaml
+      hash: md5
+      md5: e02fcc8fa0a88c7f02c9ccbb135c0505
+      size: 9624
+    - path: scripts/build_features.py
+      hash: md5
+      md5: de6d641c2e21a0c34cc63c701808fb33
+      size: 2293
+    - path: src/shef/align.py
+      hash: md5
+      md5: c05652761345dc47c6c844fa27913734
+      size: 2743
+    - path: src/shef/features
+      hash: md5
+      md5: 9669277071fbdb315a719472afa2233b.dir
+      size: 47661
+      nfiles: 12
+    - path: src/shef/timestamps.py
+      hash: md5
+      md5: 467a81ef6c2e880ed650246f582b27b7
+      size: 2492
+    - path: src/shef/weather_weights.py
+      hash: md5
+      md5: 770451e6b791703151e9b6b69f341f32
+      size: 2138
+    outs:
+    - path: data/features/obs
+      hash: md5
+      md5: 147a80931dfe19804a82ea643b20f03d.dir
+      size: 8467335
+      nfiles: 11
+    - path: data/reports/features_obs.json
+      hash: md5
+      md5: 2d57753dce6e79cfee550b58b35f2e16
+      size: 465
+  features@proxy:
+    cmd: uv run python scripts/build_features.py --mode proxy
+    deps:
+    - path: data/clean/joined
+      hash: md5
+      md5: a53ef8b31eb69e6d6308d4edf9d1ecee.dir
+      size: 4499436
+      nfiles: 11
+    - path: features.yaml
+      hash: md5
+      md5: e02fcc8fa0a88c7f02c9ccbb135c0505
+      size: 9624
+    - path: scripts/build_features.py
+      hash: md5
+      md5: de6d641c2e21a0c34cc63c701808fb33
+      size: 2293
+    - path: src/shef/align.py
+      hash: md5
+      md5: c05652761345dc47c6c844fa27913734
+      size: 2743
+    - path: src/shef/features
+      hash: md5
+      md5: 9669277071fbdb315a719472afa2233b.dir
+      size: 47661
+      nfiles: 12
+    - path: src/shef/timestamps.py
+      hash: md5
+      md5: 467a81ef6c2e880ed650246f582b27b7
+      size: 2492
+    - path: src/shef/weather_weights.py
+      hash: md5
+      md5: 770451e6b791703151e9b6b69f341f32
+      size: 2138
+    outs:
+    - path: data/features/proxy
+      hash: md5
+      md5: fd1a3a41901988b83035bad389af9c20.dir
+      size: 4225200
+      nfiles: 6
+    - path: data/reports/features_proxy.json
+      hash: md5
+      md5: 190f785b36fb8293542b88f20145e37a
+      size: 569

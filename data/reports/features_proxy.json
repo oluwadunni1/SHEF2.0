@@ -1,0 +1,24 @@
+{
+  "mode": "proxy",
+  "rows": 48576,
+  "issue_days": 2024,
+  "first_target": "2021-03-26 05:00:00+00:00",
+  "last_target": "2026-10-10 04:00:00+00:00",
+  "label_missing": 0,
+  "simulated_delay_days": 0,
+  "null_share": {
+    "holiday_name": 0.97085,
+    "temp_c": 0.01042,
+    "humidity_pct": 0.50881,
+    "precip_mm": 0.50881,
+    "tmax": 0.00988,
+    "tmin": 0.00988,
+    "tavg": 0.00988,
+    "cdd": 0.00988,
+    "hdd": 0.00988,
+    "cdd_x_hour": 0.00988,
+    "hour_x_temp": 0.01042,
+    "temp_spike_vs_mean": 0.00988
+  },
+  "seconds": 346.4
+}

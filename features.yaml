@@ -106,6 +106,7 @@ features:
 
   # Issue-time anchors: computed once per issue_time, identical for all 24 targets.
   - {name: last_known_load,          source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead], note: "newest published hour, e.g. D-1 08:00"}
+  - {name: load_staleness_h,         source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead], note: "issue_time - end of newest known hour; equals the 1 h latency normally, more when GridStatus is late"}
   - {name: dminus1_vs_lastweek,      source: load, reads_up_to: issue-latency, modes: [day_ahead], formula: "sum(D-1 hours <= cutoff) / sum(same hours, D-8)"}
   - {name: dminus1_vs_dminus2,       source: load, reads_up_to: issue-latency, modes: [day_ahead], formula: "sum(D-1 hours <= cutoff) / sum(same hours, D-2)"}
   - {name: last_known_roll_mean_24,  source: load, reads_up_to: issue-latency, modes: [day_ahead, hour_ahead]}

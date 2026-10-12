@@ -5,10 +5,35 @@ stages:
     cmd: uv run python scripts/build_clean.py
     deps:
       - scripts/build_clean.py
-      - src/shef
+      - src/shef/align.py
+      - src/shef/build.py
+      - src/shef/config.py
+      - src/shef/schemas.py
+      - src/shef/store.py
+      - src/shef/timestamps.py
+      - src/shef/validate.py
+      - src/shef/weather_weights.py
       - data/raw
     outs:
       - data/clean
     metrics:
       - data/reports/validation_joined.json:
           cache: false
+
+  features:
+    foreach: [obs, proxy]
+    do:
+      cmd: uv run python scripts/build_features.py --mode ${item}
+      deps:
+        - scripts/build_features.py
+        - src/shef/features
+        - src/shef/timestamps.py
+        - src/shef/align.py
+        - src/shef/weather_weights.py
+        - features.yaml
+        - data/clean/joined
+      outs:
+        - data/features/${item}
+      metrics:
+        - data/reports/features_${item}.json:
+            cache: false

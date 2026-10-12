@@ -1,0 +1,19 @@
+{
+  "mode": "obs",
+  "rows": 94175,
+  "issue_days": 3924,
+  "first_target": "2016-01-12 06:00:00+00:00",
+  "last_target": "2026-10-10 04:00:00+00:00",
+  "label_missing": 1,
+  "simulated_delay_days": 194,
+  "null_share": {
+    "holiday_name": 0.97171,
+    "load_lag_48": 0.00086,
+    "lag_48_x_hour": 0.00086,
+    "load_lag_168": 1e-05,
+    "dminus1_vs_lastweek": 0.01682,
+    "dminus1_vs_dminus2": 0.01682,
+    "y": 1e-05
+  },
+  "seconds": 379.9
+}
