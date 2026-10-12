@@ -6,6 +6,9 @@ FROM public.ecr.aws/lambda/python:3.14
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /bin/uv
 
+# LightGBM links against OpenMP, which the minimal Lambda base image lacks.
+RUN dnf install -y libgomp && dnf clean all
+
 COPY build/requirements-serve.txt /tmp/requirements-serve.txt
 # tzdata: America/Chicago must not depend on the base image's zoneinfo.
 RUN uv pip install --system --no-cache -r /tmp/requirements-serve.txt tzdata
