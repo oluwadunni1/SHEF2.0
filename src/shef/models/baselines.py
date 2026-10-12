@@ -26,7 +26,7 @@ def score_on_folds(tables: dict) -> pd.DataFrame:
     proxy = tables["proxy"]
     for f in folds.FOLDS:
         v = proxy[folds.val_mask(proxy, f)]
-        v = v[~v["is_uri"]].dropna(subset=["y"])
+        v = v[~v["is_uri"]].dropna(subset=["y", "temp_c"])  # same scored rows as data.fold_data
         part = v[KEEP].copy()
         part["fold"] = f.id
         for name in BASELINES:

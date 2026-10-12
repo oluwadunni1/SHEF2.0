@@ -85,9 +85,27 @@ Built by `scripts/backfill.py` then `scripts/build_clean.py`. Every stage passes
 - The Open-Meteo archive still returned values up to the current hour. Those recent values are model output, not reanalysis, and they get revised. That's why ranges ending within 10 days are never cached.
 - So the observed half of the windows that straddle issue time (`tmax_roll_max_72`, `*_lag_24`) must come from what is available at 10:00 CT, meaning the forecast API's `past_days`. Training must replay the same source, not ERA5.
 
-## 4. Still open
+## 4. P3 model selection (2026-10-12)
+
+Notebooks `01`–`04`, all runs in MLflow (`shef2-day-ahead` on DagsHub). Validation: 3 yearly folds, Aug 2022 → Aug 2025, scored on archived forecast weather.
+
+| | MAPE | Peak-MAPE |
+|---|---|---|
+| Floor: freshest legal same-hour load | 8.04% | 5.70% |
+| **Champion: LightGBM + trend target, default parameters, ERA5 training** | **4.18%** | **2.99%** |
+
+Scores cover hours that have an archived forecast; Uri is excluded.
+- Tuning (E8) and ensembling (E7) gained ≤ 0.06 points, which is within noise. The LSTM (E6) scored 5.46% / 6.10% and didn't help the blend.
+
+**The archived forecast has a hole: Dec 31 2023 → Jan 18 2024** (506 validation hours, no `temp_c` in Previous Runs).
+- A model trained on ERA5 has never seen missing temperature. It output a flat ~10.8 GW: 30–60% too high on mild days, 23% too low in the Jan 15–17 cold snap.
+- **P4/P5 requirement:** forecast temperature must be complete for all target hours, or no model prediction is made. In that case the pipeline falls back to the baseline and alerts.
+
+**Weather model:** `gfs_seamless` and `best_match` give identical scores. In the archive, `best_match` temperature at these sites is GFS. **Serve with `models=gfs_seamless`** so live inputs match training, and archive it in the daily snapshot.
+
+## 5. Still open
 
 - [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
 - [ ] Hour-ahead go / no-go: a ~25 min delay makes it technically possible, but one sample is not enough. Parked as optional P7.
 - [x] Confirm Open-Meteo `previous_day1` lead definition: predicted 24 h before valid time
-- [ ] Choose the weather model: `best_match` vs a fixed model such as `gfs_seamless` (P3)
+- [x] Weather model: `gfs_seamless` (identical to `best_match` in the archive; pinned for live parity)

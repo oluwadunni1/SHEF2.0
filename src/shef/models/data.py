@@ -62,7 +62,9 @@ def _finish(train: pd.DataFrame, val: pd.DataFrame, fold_id, uri: str, uri_weigh
     if uri == "exclude":
         train = train[~train["is_uri"]]
     weight = np.where(train["is_uri"], uri_weight if uri == "weight" else 1.0, 1.0)
-    val = val[~val["is_uri"]].dropna(subset=["y"])
+    # Hours with no archived forecast (e.g. Previous Runs has nothing for 2023-12-31..2024-01-18)
+    # are not scored: live serving always has a forecast or refuses to predict (P4 gate).
+    val = val[~val["is_uri"]].dropna(subset=["y", "temp_c"])
     b = bundle.fit(train)
     return FoldData(fold_id, bundle.apply(train, b).reset_index(drop=True), bundle.apply(val, b).reset_index(drop=True),
                     weight, b)
