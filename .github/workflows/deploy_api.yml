@@ -57,15 +57,19 @@ jobs:
       - name: Build image
         run: docker build --platform linux/amd64 --provenance=false -t shef2-api:local .
 
+      - name: Import the handler inside the image
+        run: docker run --rm --entrypoint python shef2-api:local -c "from shef.serving.app import handler, app; print('handler OK:', app.title)"
+
       - name: Container smoke test (Lambda runtime emulator, Function URL event)
         run: |
           docker run -d --name api -p 9000:8080 -e API_KEY=local-test-key-0123456789abcdef0123 shef2-api:local
+          trap 'echo "--- container log"; docker logs api 2>&1 | tail -40' EXIT
           sleep 3
           EVENT='{"version":"2.0","routeKey":"$default","rawPath":"/health","rawQueryString":"",
                   "headers":{"host":"local"},"requestContext":{"http":{"method":"GET","path":"/health",
                   "protocol":"HTTP/1.1","sourceIp":"127.0.0.1","userAgent":"ci"}},"isBase64Encoded":false}'
-          OUT=$(curl -sf -d "$EVENT" http://localhost:9000/2015-03-31/functions/function/invocations)
-          docker logs api | tail -20
+          OUT=$(curl -s --retry 5 --retry-connrefused --retry-delay 2 -d "$EVENT"                 http://localhost:9000/2015-03-31/functions/function/invocations)
+          echo "response: ${OUT:0:500}"
           echo "$OUT" | python3 -c "
           import json, sys
           r = json.load(sys.stdin); h = json.loads(r['body'])
