@@ -1,0 +1,18 @@
+# Unit tests, including the leakage and parity tests for the feature builder.
+# They use synthetic data only, so no secrets or DVC pull are needed.
+name: tests
+
+on:
+  push:
+    paths-ignore: ["data/**", "**.md"]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - run: uv sync --frozen
+      - run: uv run pytest -q
