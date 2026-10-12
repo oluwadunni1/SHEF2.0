@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  SHEF 2.0 forecast API: one Lambda (container image) behind a Function URL.
+  Deployed by .github/workflows/deploy_api.yml; the image tag is the git commit.
+
+Parameters:
+  ImageUri:
+    Type: String
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+  ApiKey:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+
+Resources:
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/shef2-api
+      RetentionInDays: 14
+
+  Function:
+    Type: AWS::Lambda::Function
+    DependsOn: Logs
+    Properties:
+      FunctionName: shef2-api
+      Description: Day-ahead hourly load forecast, ERCOT South Central
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      Role: !ImportValue shef2-api-exec-role
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 30
+      Environment:
+        Variables:
+          DATABASE_URL: !Ref DatabaseUrl
+          API_KEY: !Ref ApiKey
+
+  Url:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref Function
+      AuthType: NONE   # /health is public; /forecast and /actuals check x-api-key in the app
+
+  PublicUrl:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  PublicUrlInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  FunctionUrl:
+    Value: !GetAtt Url.FunctionUrl

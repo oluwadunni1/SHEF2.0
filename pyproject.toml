@@ -28,9 +28,20 @@ dependencies = [
 dev = [
     "dvc>=3.67.1",
     "dvc-s3>=3.3.0",
+    "httpx>=0.28.1",
     "ipykernel>=7.4.0",
     "jupyter>=1.1.1",
     "pytest>=9.1.1",
+]
+serve = [
+    "fastapi>=0.143.0",
+    "lightgbm>=4.7.0",
+    "mangum>=0.22.0",
+    "numpy>=2.5.4",
+    "pandas>=3.0.6",
+    "psycopg[binary]>=3.3.6",
+    "pydantic>=2.14.1",
+    "pyyaml>=6.0.3",
 ]
 
 [build-system]
@@ -42,3 +53,6 @@ module-name = "shef"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+default-groups = ["dev", "serve"]

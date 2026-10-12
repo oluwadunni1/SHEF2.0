@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!features.yaml
+!src/shef/**
+!build/requirements-serve.txt
+!build/model/**
+**/__pycache__

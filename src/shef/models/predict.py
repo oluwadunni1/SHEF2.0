@@ -20,8 +20,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from shef.features import BUNDLE_FEATURES
 from shef.features import bundle as bundle_mod
-from shef.models import data, gbdt
 from shef.models.targets import Target
 
 REQUIRED_COMPLETE = ["temp_c"]
@@ -41,6 +41,8 @@ class Champion:
     @classmethod
     def fit(cls, train: pd.DataFrame, features: list[str], target_kind: str = "trend", params: dict | None = None):
         """train: replayed feature rows with `y` (bundle not yet applied)."""
+        from shef.models import gbdt  # training-only; the serving image never imports it
+
         b = bundle_mod.fit(train)
         tr = bundle_mod.apply(train, b)
         t = Target(target_kind).fit(tr, tr["y"])
@@ -51,7 +53,7 @@ class Champion:
         return cls(model, t, b, features)
 
     def check(self, rows: pd.DataFrame) -> None:
-        missing = [c for c in self.features if c not in rows.columns and c not in data.BUNDLE_FEATURES]
+        missing = [c for c in self.features if c not in rows.columns and c not in BUNDLE_FEATURES]
         if missing:
             raise KeyError(f"feature rows lack {missing}")
         bad = rows[REQUIRED_COMPLETE].isna().any(axis=1)
