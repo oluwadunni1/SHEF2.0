@@ -1,0 +1,6 @@
+[core]
+    remote = r2
+['remote "r2"']
+    url = s3://ml-workspace/shef2/dvc-storage
+    endpointurl = https://9430da28a5c56d786bca9ca9a9c5bcb4.r2.cloudflarestorage.com
+    region = auto
