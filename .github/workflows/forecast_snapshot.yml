@@ -1,0 +1,90 @@
+# Archive the Open-Meteo forecast exactly as we would serve it at issue time
+# (10:00 America/Chicago). Training uses the Previous Runs API as a stand-in
+# for served forecasts; this archive is the ground truth to check it against.
+#
+# GitHub cron is UTC-only, so it fires at 15:00 and 16:00 UTC and the guard
+# keeps whichever run lands at 10:xx Central (CDT in summer, CST in winter).
+name: forecast-snapshot
+
+on:
+  schedule:
+    - cron: "0 15 * * *"
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run every step but don't push data or commit (for testing at any hour)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forecast-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - name: Is it 10:xx in Central time?
+        id: guard
+        run: |
+          now=$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z')
+          hour=$(TZ=America/Chicago date +%H)
+          if [ "$hour" = "10" ] || [ "$DRY_RUN" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "$now: proceeding (dry_run=$DRY_RUN)"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "$now: not the issue hour; skipping"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.run == 'true'
+
+      - uses: astral-sh/setup-uv@v6
+        if: steps.guard.outputs.run == 'true'
+
+      - name: Install
+        if: steps.guard.outputs.run == 'true'
+        run: uv sync --frozen
+
+      - name: Pull raw data from R2
+        if: steps.guard.outputs.run == 'true'
+        run: uv run dvc pull data/raw.dvc
+
+      - name: Snapshot the live forecast
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            uv run python scripts/snapshot_forecast.py
+          else
+            uv run python scripts/snapshot_forecast.py --only-at-issue
+          fi
+
+      - name: Version and push to R2
+        if: steps.guard.outputs.run == 'true' && env.DRY_RUN != 'true'
+        run: |
+          uv run dvc add data/raw
+          uv run dvc push
+
+      - name: Commit the new data/raw.dvc
+        if: steps.guard.outputs.run == 'true' && env.DRY_RUN != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw.dvc
+          if git diff --cached --quiet; then
+            echo "No data change to commit."
+            exit 0
+          fi
+          git commit -m "data: forecast snapshot $(TZ=America/Chicago date +%Y-%m-%d)"
+          git pull --rebase
+          git push
