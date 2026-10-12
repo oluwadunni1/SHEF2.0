@@ -75,3 +75,26 @@ def test_hill_climb_prefers_the_better_member_and_lofo_is_honest():
     scored = pd.DataFrame({"y": y, "good": good, "bad": bad, "fold": np.repeat([1, 2, 3], 200)})
     blended, used = ensemble.leave_one_fold_out(scored, ["good", "bad"])
     assert set(used) == {1, 2, 3} and not np.isnan(blended).any()
+
+
+def test_champion_round_trip_and_forecast_gate(tmp_path):
+    from datetime import date as d
+
+    from shef.features import contract_features, BUNDLE_FEATURES
+    from shef.features.replay import replay
+    from shef.models.predict import Champion, ForecastIncomplete
+    from tests.test_features import synthetic_joined
+
+    j = synthetic_joined("2025-04-15", "2025-08-10")
+    rows = replay(j, d(2025, 4, 26), d(2025, 7, 31), "obs")
+    feats = [f for f in contract_features() if f not in ("humidity_pct", "precip_mm")]
+    champ = Champion.fit(rows.dropna(subset=["y"]), feats, params={"n_estimators": 50})
+    day = replay(j, d(2025, 8, 5), d(2025, 8, 5), "proxy")
+    before = champ.predict(day)
+    after = Champion.load(champ.save(tmp_path / "m")).predict(day)
+    np.testing.assert_allclose(before, after, rtol=1e-9)
+
+    holey = day.copy()
+    holey.loc[3, "temp_c"] = np.nan
+    with pytest.raises(ForecastIncomplete):
+        champ.predict(holey)

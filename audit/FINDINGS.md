@@ -103,6 +103,8 @@ Scores cover hours that have an archived forecast; Uri is excluded.
 
 **Weather model:** `gfs_seamless` and `best_match` give identical scores. In the archive, `best_match` temperature at these sites is GFS. **Serve with `models=gfs_seamless`** so live inputs match training, and archive it in the daily snapshot.
 
+**Holdout (Aug 2025 → Oct 2026, scored once):** champion **3.79% MAPE / 3.38% Peak-MAPE**, vs the baseline's 7.62% / 3.79%; RMSE 482 vs 1,013 MW, bias −0.17%. The production model is retrained on 2016-01-12 → 2026-10-09 and registered as **`shef2-day-ahead` v1** (MLflow pyfunc; bundle, trend line and forecast gate included).
+
 ## 5. Still open
 
 - [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
