@@ -21,3 +21,6 @@ data/cache/
 data/reports/*.log
 data/reports/validation_raw_*.json
 data/reports/validation_clean_*.json
+
+# CatBoost scratch logs
+catboost_info/

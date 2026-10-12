@@ -37,7 +37,8 @@ def xgb(**params):
 def catboost(**params):
     import catboost as cb
 
-    base = dict(iterations=800, learning_rate=0.05, depth=8, random_seed=SEED, verbose=0, thread_count=N_JOBS)
+    base = dict(iterations=800, learning_rate=0.05, depth=8, random_seed=SEED, verbose=0, thread_count=N_JOBS,
+                allow_writing_files=False)
     return cb.CatBoostRegressor(**{**base, **params})
 
 
