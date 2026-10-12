@@ -5,20 +5,31 @@ description = "Day-ahead hourly load forecast for ERCOT South Central"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "catboost>=1.2.10",
     "gridstatusio>=0.16.0",
     "holidays>=0.106",
+    "lightgbm>=4.7.0",
+    "matplotlib>=3.11.2",
+    "mlflow>=3",
+    "optuna>=5.0.0",
     "pandas>=3.0.6",
     "pandera[pandas]>=0.34.1",
-    "pyarrow>=26.0.0",
+    "pyarrow>=21",
     "python-dotenv>=1.2.4",
     "pyyaml>=6.0.3",
     "requests>=2.34.2",
+    "scikit-learn>=1.9.1",
+    "shap>=0.53.0",
+    "torch>=2.14.1",
+    "xgboost>=3.4.1",
 ]
 
 [dependency-groups]
 dev = [
     "dvc>=3.67.1",
     "dvc-s3>=3.3.0",
+    "ipykernel>=7.4.0",
+    "jupyter>=1.1.1",
     "pytest>=9.1.1",
 ]
 

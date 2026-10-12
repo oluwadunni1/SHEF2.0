@@ -33,12 +33,13 @@ def upsert(df: pd.DataFrame, layer: str, name: str, keys: list[str], ts_col: str
     return total
 
 
-def read(layer: str, name: str) -> pd.DataFrame:
+def read(layer: str, name: str, columns: list[str] | None = None) -> pd.DataFrame:
+    """columns: read only these (keeps memory down on this 8 GB machine)."""
     d = _dir(layer, name)
     files = sorted(d.glob("year=*.parquet"))
     if not files:
         return pd.DataFrame()
-    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    return pd.concat([pd.read_parquet(f, columns=columns) for f in files], ignore_index=True)
 
 
 def write(df: pd.DataFrame, layer: str, name: str, ts_col: str = "ts_utc") -> None:
