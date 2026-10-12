@@ -64,7 +64,7 @@ jobs:
         if: steps.guard.outputs.run == 'true'
         run: |
           if [ "$DRY_RUN" = "true" ]; then
-            uv run python scripts/snapshot_forecast.py
+            uv run python scripts/snapshot_forecast.py --dry-run
           else
             uv run python scripts/snapshot_forecast.py --only-at-issue
           fi

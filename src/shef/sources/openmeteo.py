@@ -94,16 +94,23 @@ def fetch(source: str, city: str, start: date, end: date, cache_dirs: list[Path]
     return _to_frame(payload, city, source)
 
 
-def fetch_live_forecast(city: str, past_days: int = 3, forecast_days: int = 3) -> pd.DataFrame:
-    """The forecast we would serve right now: latest run, best_match model."""
+def fetch_live_forecast(city: str, past_days: int = 3, forecast_days: int = 3, model: str | None = None) -> pd.DataFrame:
+    """The forecast we would serve right now: latest run of `model` (Open-Meteo's
+    best_match blend when None). Serving uses gfs_seamless, the model the
+    training proxy matches (P3 E10)."""
     coords = CITY_COORDS[city]
-    resp = _get(URLS["forecast"], {
+    params = {
         "latitude": coords["lat"],
         "longitude": coords["lon"],
         "hourly": ",".join(hourly_vars("forecast")),
         "past_days": past_days,
         "forecast_days": forecast_days,
         "timezone": "UTC",
-    })
+    }
+    if model:
+        params["models"] = model
+    resp = _get(URLS["forecast"], params)
     resp.raise_for_status()
-    return _to_frame(resp.json(), city, "forecast")
+    df = _to_frame(resp.json(), city, "forecast")
+    df["model"] = model or "best_match"
+    return df
