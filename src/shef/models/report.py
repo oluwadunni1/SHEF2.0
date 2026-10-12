@@ -15,7 +15,7 @@ def summary(scored: pd.DataFrame, preds: list[str]) -> pd.DataFrame:
 
 
 def log_scored(name: str, scored: pd.DataFrame, pred: str, params: dict, *, figures: dict | None = None,
-               dicts: dict | None = None, tags: dict | None = None) -> str:
+               dicts: dict | None = None, files: dict | None = None, tags: dict | None = None) -> str:
     s = scored.dropna(subset=[pred])
     metrics = score_folds(s, pred)
     standard = {
@@ -29,7 +29,7 @@ def log_scored(name: str, scored: pd.DataFrame, pred: str, params: dict, *, figu
     tables = {"by_lead": by(s, "lead_hours", pred).reset_index().to_dict("list"),
               "by_month": by(s, "month", pred).reset_index().to_dict("list")}
     run_id = tracking.log_run(name, params, metrics, figures=figs, frames=frames,
-                              dicts={**tables, **(dicts or {})}, tags=tags)
+                              dicts={**tables, **(dicts or {})}, files=files, tags=tags)
     for f in standard.values():  # only our own; the caller may still want to show theirs
         plt.close(f)
     return run_id
@@ -40,3 +40,21 @@ def log_result(result, *, figures: dict | None = None, dicts: dict | None = None
     fitted = {f"fold{k}": {"target": t.to_dict(), "bundle": b.__dict__} for k, (_, t, b) in result.models.items()}
     return log_scored(result.spec.name, result.scored, "pred", {**result.spec.params(), "seconds": round(result.seconds, 1)},
                       figures=figures, dicts={"fitted_per_fold": fitted, **(dicts or {})}, tags=tags)
+
+
+def results_table(results: dict) -> pd.DataFrame:
+    """name -> cv.Result, as one comparison table."""
+    rows = {}
+    for name, r in results.items():
+        m = r.metrics
+        rows[name] = {"mape": m["mape"], "peak_mape": m["peak_mape"], "rmse": m["rmse"], "bias_pct": m["bias_pct"],
+                      **{f"fold{i}_mape": m[f"fold{i}_mape"] for i in r.spec.fold_ids}, "minutes": r.seconds / 60}
+    return pd.DataFrame(rows).T.round(2).sort_values("mape")
+
+
+def champion(table: pd.DataFrame, floor_peak_mape: float) -> str:
+    """Lowest MAPE among rows whose peak-MAPE is no worse than the best baseline's."""
+    ok = table[table["peak_mape"] <= floor_peak_mape]
+    if ok.empty:
+        raise ValueError("No candidate meets the peak-MAPE rule.")
+    return ok["mape"].idxmin()

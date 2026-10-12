@@ -191,3 +191,25 @@ def test_live_path_matches_replay(joined):
 
     live = build_live(issue, day, gridstatus_raw, snapshot_raw)
     pd.testing.assert_frame_equal(features_only(live), features_only(replayed), check_exact=False, rtol=1e-9)
+
+
+# --- LSTM sequences ---------------------------------------------------------
+@pytest.mark.parametrize("day", [date(2025, 3, 9), date(2025, 7, 1), date(2025, 11, 2)])
+def test_sequences_ignore_the_future(joined, day):
+    from shef.features import sequences
+
+    issue = issue_time_utc(day)
+    clean = sequences.build(joined, day, day, "proxy")
+    poisoned = sequences.build(poison_future(joined, issue), day, day, "proxy")
+    np.testing.assert_array_equal(clean.enc, poisoned.enc)
+    np.testing.assert_array_equal(clean.dec, poisoned.dec)
+    np.testing.assert_array_equal(clean.level, poisoned.level)
+
+
+def test_sequences_pad_dst_days(joined):
+    from shef.features import sequences
+
+    s = sequences.build(joined, date(2025, 3, 9), date(2025, 3, 10), "proxy")
+    assert s.mask[0].sum() == 23 and s.mask[1].sum() == 24
+    assert np.isnat(s.target_ts[0, 23:]).all()
+    assert s.enc.shape[1:] == (sequences.ENC_HOURS, len(sequences.ENC_FEATURES))
