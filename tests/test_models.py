@@ -62,3 +62,16 @@ def test_trend_target_learns_the_line():
     y = pd.Series(1000 + 50 * df["trend_idx"])
     t = Target("trend").fit(df, y)
     assert (t.intercept, t.slope) == pytest.approx((1000, 50))
+
+
+def test_hill_climb_prefers_the_better_member_and_lofo_is_honest():
+    from shef.models import ensemble
+
+    rng = np.random.default_rng(1)
+    y = rng.uniform(8000, 12000, 600)
+    good, bad = y * (1 + rng.normal(0, 0.03, 600)), y * (1 + rng.normal(0, 0.10, 600))
+    w = ensemble.hill_climb({"good": good, "bad": bad}, y)
+    assert w["good"] > w["bad"]
+    scored = pd.DataFrame({"y": y, "good": good, "bad": bad, "fold": np.repeat([1, 2, 3], 200)})
+    blended, used = ensemble.leave_one_fold_out(scored, ["good", "bad"])
+    assert set(used) == {1, 2, 3} and not np.isnan(blended).any()

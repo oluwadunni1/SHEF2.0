@@ -55,7 +55,8 @@ def _to_frame(payload: dict, city: str, source: str) -> pd.DataFrame:
     return df
 
 
-def fetch(source: str, city: str, start: date, end: date, cache_dirs: list[Path] | None = None) -> pd.DataFrame:
+def fetch(source: str, city: str, start: date, end: date, cache_dirs: list[Path] | None = None,
+          model: str | None = None) -> pd.DataFrame:
     """
     One city, one source, one date range (inclusive, UTC dates).
 
@@ -63,7 +64,7 @@ def fetch(source: str, city: str, start: date, end: date, cache_dirs: list[Path]
     Returns an empty frame if the API does not serve that range (HTTP 400).
     """
     cache_dirs = cache_dirs or []
-    name = f"{source}_{city}_{start}_{end}.json"
+    name = f"{source}_{city}_{start}_{end}.json" if model is None else f"{source}_{model}_{city}_{start}_{end}.json"
     cacheable = end < date.today() - timedelta(days=RECENT_DAYS)
 
     if cacheable:
@@ -72,14 +73,17 @@ def fetch(source: str, city: str, start: date, end: date, cache_dirs: list[Path]
                 return _to_frame(json.loads((d / name).read_text()), city, source)
 
     coords = CITY_COORDS[city]
-    resp = _get(URLS[source], {
+    params = {
         "latitude": coords["lat"],
         "longitude": coords["lon"],
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "hourly": ",".join(hourly_vars(source)),
         "timezone": "UTC",
-    })
+    }
+    if model:
+        params["models"] = model
+    resp = _get(URLS[source], params)
     if resp.status_code != 200:
         print(f"  {source} {city} {start}..{end}: HTTP {resp.status_code} {resp.text[:160]}")
         return pd.DataFrame()

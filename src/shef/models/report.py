@@ -52,9 +52,12 @@ def results_table(results: dict) -> pd.DataFrame:
     return pd.DataFrame(rows).T.round(2).sort_values("mape")
 
 
-def champion(table: pd.DataFrame, floor_peak_mape: float) -> str:
-    """Lowest MAPE among rows whose peak-MAPE is no worse than the best baseline's."""
+def champion(table: pd.DataFrame, floor_peak_mape: float, tie_mape: float = 0.1) -> str:
+    """Champion rule (tightened after notebook 02): among rows whose peak-MAPE beats the
+    best baseline's, take the lowest MAPE; anything within `tie_mape` points of it is a
+    tie, and the tie goes to the better peak-MAPE."""
     ok = table[table["peak_mape"] <= floor_peak_mape]
     if ok.empty:
         raise ValueError("No candidate meets the peak-MAPE rule.")
-    return ok["mape"].idxmin()
+    ties = ok[ok["mape"] <= ok["mape"].min() + tie_mape]
+    return ties["peak_mape"].idxmin()

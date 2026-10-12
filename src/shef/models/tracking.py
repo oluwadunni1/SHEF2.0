@@ -65,3 +65,15 @@ def log_run(name: str, params: dict, metrics: dict, *, figures: dict | None = No
         for sub, path in (files or {}).items():
             mlflow.log_artifact(str(path), sub)
         return run.info.run_id
+
+
+def load_oof(run_name: str, experiment: str = EXPERIMENT) -> pd.DataFrame:
+    """Out-of-fold predictions logged by report.log_scored, newest run with that name."""
+    import mlflow
+
+    runs = mlflow.search_runs(experiment_names=[experiment], filter_string=f"tags.mlflow.runName = '{run_name}'",
+                              order_by=["start_time DESC"], max_results=1)
+    if runs.empty:
+        raise KeyError(run_name)
+    path = mlflow.artifacts.download_artifacts(run_id=runs.iloc[0]["run_id"], artifact_path="data/oof_predictions.parquet")
+    return pd.read_parquet(path)
