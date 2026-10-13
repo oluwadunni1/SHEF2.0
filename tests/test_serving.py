@@ -155,3 +155,27 @@ def test_bounds_match_the_clean_gate():
 
 def test_nan_features_are_stored_as_null():
     assert db.json_safe({"a": float("nan"), "b": 1.0}) == {"a": None, "b": 1.0}
+
+
+def test_forecast_reads_back_only_the_served_snapshot(monkeypatch):
+    """The daily job forecasts from the archived gfs_seamless rows of the issue date, nothing else."""
+    import importlib.util
+    from pathlib import Path
+
+    from shef import store
+
+    spec = importlib.util.spec_from_file_location("forecast_day", Path(__file__).parents[1] / "scripts/forecast_day.py")
+    fd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fd)
+    t = pd.Timestamp("2026-10-13 15:00", tz="UTC")
+    snap = pd.DataFrame({
+        "time": [t] * 4, "city": ["austin"] * 4, "temperature_2m": [1.0, 2.0, 3.0, 4.0],
+        "model": ["gfs_seamless", "best_match", "gfs_seamless", "gfs_seamless"],
+        "issue_date_central": ["2026-10-13", "2026-10-13", "2026-10-12", "2026-10-13"],
+        "run_fetched_at_utc": [t] * 4})
+    snap = snap.drop(index=3)
+    monkeypatch.setattr(store, "read", lambda layer, name, columns=None: snap)
+    got = fd.archived_weather(pd.Timestamp("2026-10-13 15:00", tz="UTC"))
+    assert got["temperature_2m"].tolist() == [1.0] and "model" not in got
+    with pytest.raises(SystemExit):
+        fd.archived_weather(pd.Timestamp("2026-10-20 15:00", tz="UTC"))

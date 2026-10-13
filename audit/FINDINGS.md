@@ -129,7 +129,26 @@ Scores cover hours that have an archived forecast; Uri is excluded.
 - LightGBM needs `libgomp`, which the Lambda base image lacks.
 - Lambda needs an ECR repository policy to pull the image.
 
-## 6. Still open
+## 6. P5 orchestration (2026-10-13)
+
+`.github/workflows/daily.yml` replaces `forecast_snapshot.yml` and the manual `forecast.yml`. One job runs at 10:xx Central:
+1. Snapshot both weather models to DVC/R2.
+2. Forecast tomorrow through the API **from the archived `gfs_seamless` rows**, so what was served is exactly what was stored.
+3. Send the last 10 days of realised load to `/actuals`.
+
+**Scheduling:**
+- GitHub dropped the whole scheduled day on 2026-10-12. So the job has three slots at :07, off the top of the hour: 15:07 and 16:07 UTC, whichever is 10:xx Central, plus a 17:37 UTC catch-up.
+- The catch-up snapshots only if today's snapshot is missing (with a warning that it is late), then re-forecasts. A re-forecast is idempotent: 0 rows if the forecast is already logged.
+
+**Credentials:** the R2 keys (stored as `AWS_*`) reach only the DVC steps. The OIDC forecast role is assumed after the last DVC step.
+
+**Alerting:** a fallback forecast exits 2, which fails the run, and GitHub sends a failure email.
+- These emails go to whoever last edited the cron lines.
+- A late snapshot shows as a warning annotation.
+
+**Verified:** a dry run passed. It pulled from R2, snapshotted both models with 100% of temperatures present, and made a signed `/health` call with the forecast role. The first scheduled run is 2026-10-13 15:07 UTC, for 2026-10-14.
+
+## 7. Still open
 
 - [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
 - [ ] Hour-ahead go / no-go: a ~25 min delay makes it technically possible, but one sample is not enough. Parked as optional P7.
