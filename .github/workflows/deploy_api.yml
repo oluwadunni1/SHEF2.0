@@ -95,6 +95,16 @@ jobs:
 
       - name: Deploy stack
         run: |
+          # A first create that failed leaves ROLLBACK_COMPLETE, which can only be deleted.
+          STATUS=$(aws cloudformation describe-stacks --stack-name shef2-api \
+                   --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo NONE)
+          if [ "$STATUS" = ROLLBACK_COMPLETE ]; then
+            aws cloudformation delete-stack --stack-name shef2-api
+            aws cloudformation wait stack-delete-complete --stack-name shef2-api
+          fi
+          trap 'aws cloudformation describe-stack-events --stack-name shef2-api --max-items 15 \
+                  --query "StackEvents[?contains(ResourceStatus, \`FAILED\`)].[LogicalResourceId,ResourceStatusReason]" \
+                  --output text || true' ERR
           aws cloudformation deploy --stack-name shef2-api --template-file infra/api.yaml \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
