@@ -7,9 +7,12 @@ Description: >
   No long-lived AWS keys are stored anywhere.
 
 Parameters:
-  GitHubRepo:
+  GitHubSubjectPrefix:
     Type: String
-    Default: oluwadunni1/SHEF2.0
+    # GitHub's immutable OIDC subject: owner and repo names pinned to their numeric
+    # ids, so a deleted-and-recreated repo with the same name cannot assume these
+    # roles. Check with: gh api repos/<owner>/<repo>/actions/oidc/customization/sub
+    Default: repo:oluwadunni1@171298512/SHEF2.0@1415648897
   CreateOIDCProvider:
     Type: String
     AllowedValues: ["true", "false"]
@@ -66,7 +69,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Sub ${GitHubSubjectPrefix}:ref:refs/heads/main
       Policies:
         - PolicyName: deploy-shef2-api
           PolicyDocument:
@@ -128,7 +131,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Sub ${GitHubSubjectPrefix}:ref:refs/heads/main
       Policies:
         - PolicyName: invoke-shef2-api
           PolicyDocument:
