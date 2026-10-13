@@ -35,6 +35,18 @@ Resources:
     Properties:
       RepositoryName: shef2-api
       ImageScanningConfiguration: {ScanOnPush: true}
+      # Lambda pulls the image itself, so the repository must allow the Lambda
+      # service, and only on behalf of the shef2-api function.
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaPull
+            Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
+            Condition:
+              StringLike:
+                aws:sourceArn: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:shef2-api*
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules": [{"rulePriority": 1, "description": "keep the last 5 images",
