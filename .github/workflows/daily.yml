@@ -1,0 +1,138 @@
+# The daily day-ahead loop, at 10:00 America/Chicago:
+#   1. snapshot the Open-Meteo forecast (gfs_seamless served + best_match) -> DVC/R2
+#   2. forecast tomorrow from THAT snapshot through the deployed API -> Supabase
+#   3. send realised load so yesterday's rows get actual_load_mw
+#
+# GitHub cron is UTC-only and best-effort (a whole day was dropped on
+# 2026-10-12), so there are three slots, at :07 to avoid top-of-hour load:
+#   15:07 / 16:07 UTC  whichever is 10:xx Central (CDT / CST) is the issue run
+#   17:37 UTC          catch-up: snapshot only if today's is missing, then
+#                      forecast (idempotent: logs nothing if already done)
+# A fallback forecast (missing forecast temperature) exits 2 and fails the run,
+# so GitHub's failure email is the alert.
+#
+# Credentials: the AWS_* secrets are Cloudflare R2 keys for DVC and are given
+# only to the DVC steps. Real AWS access is the OIDC forecast role, assumed
+# after the last DVC step, so the two never meet in one environment.
+name: daily
+
+on:
+  schedule:
+    - cron: "7 15 * * *"
+    - cron: "7 16 * * *"
+    - cron: "37 17 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Snapshot without storing, check the API, log nothing (any hour)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+jobs:
+  day-ahead:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - name: Which slot is this?
+        id: slot
+        run: |
+          hour=$(TZ=America/Chicago date +%H)
+          if [ "$DRY_RUN" = "true" ]; then mode=dry
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then mode=catchup
+          elif [ "$hour" = "10" ]; then mode=issue
+          elif [ "$hour" = "11" ] || [ "$hour" = "12" ]; then mode=catchup
+          else mode=skip; fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z'): mode=$mode"
+
+      - uses: actions/checkout@v7
+        if: steps.slot.outputs.mode != 'skip'
+      - uses: astral-sh/setup-uv@v10.3.0
+        if: steps.slot.outputs.mode != 'skip'
+      - name: Install
+        if: steps.slot.outputs.mode != 'skip'
+        run: uv sync --frozen
+
+      - name: Pull raw data from R2
+        if: steps.slot.outputs.mode != 'skip'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: uv run dvc pull data/raw.dvc
+
+      - name: Snapshot the forecast
+        id: snap
+        if: steps.slot.outputs.mode != 'skip'
+        env:
+          MODE: ${{ steps.slot.outputs.mode }}
+        run: |
+          if [ "$MODE" = dry ]; then
+            uv run python scripts/snapshot_forecast.py --dry-run
+            exit 0
+          fi
+          today=$(TZ=America/Chicago date +%Y-%m-%d)
+          have=$(uv run python -c "
+          from shef import store
+          s = store.read('raw', 'weather_fc_live')
+          print(int(((s['issue_date_central'] == '$today') & (s.get('model') == 'gfs_seamless')).any()))")
+          if [ "$have" = 1 ]; then
+            echo "snapshot for $today already archived; keeping it"
+          else
+            [ "$MODE" = catchup ] && echo "::warning::late snapshot: the 10:00 Central run did not archive $today"
+            uv run python scripts/snapshot_forecast.py
+            echo "stored=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Version and push to R2
+        if: steps.snap.outputs.stored == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          uv run dvc add data/raw
+          uv run dvc push
+
+      - name: Commit the new data/raw.dvc
+        if: steps.snap.outputs.stored == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw.dvc
+          if git diff --cached --quiet; then echo "No data change to commit."; exit 0; fi
+          git commit -m "data: forecast snapshot $(TZ=America/Chicago date +%Y-%m-%d)"
+          git pull --rebase
+          git push
+
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        if: steps.slot.outputs.mode != 'skip'
+        with:
+          role-to-assume: ${{ secrets.AWS_FORECAST_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Forecast tomorrow and send actuals
+        if: steps.slot.outputs.mode == 'issue' || steps.slot.outputs.mode == 'catchup'
+        env:
+          GRIDSTATUS_API_KEY: ${{ secrets.GRIDSTATUS_API_KEY }}
+          SHEF_API_URL: ${{ vars.SHEF_API_URL }}
+        run: uv run python scripts/forecast_day.py --from-snapshot
+
+      - name: Dry run: signed /health only
+        if: steps.slot.outputs.mode == 'dry'
+        env:
+          SHEF_API_URL: ${{ vars.SHEF_API_URL }}
+        run: |
+          uv run python -c "
+          import os
+          from shef.serving import client
+          h = client.get(os.environ['SHEF_API_URL'], '/health')
+          print('API up:', h['model_name'], 'v' + h['model_version'])"

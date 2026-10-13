@@ -2,7 +2,8 @@
 forecast_day.py — the day-ahead client: fetch what is known at issue time,
 build the feature rows, ask the API for the forecast, report realised load.
 
-    1. GridStatus load for the last 10 days + Open-Meteo gfs_seamless (4 cities)
+    1. GridStatus load for the last 10 days + Open-Meteo gfs_seamless (4 cities),
+       fetched now or (--from-snapshot, the daily job) read from today's archived snapshot
     2. features.live.build_live(issue_time, target_day, ...)   (parity-tested vs replay)
     3. POST /forecast                                          (API predicts + logs)
     4. POST /actuals with the fetched load                     (fills actual_load_mw)
@@ -33,11 +34,24 @@ from shef.timestamps import issue_time_utc
 LATE_WARNING = pd.Timedelta(hours=3)
 
 
-def fetch(issue: pd.Timestamp, now: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
-    load = gridstatus.fetch_load(issue - pd.Timedelta(days=10), now)
-    weather = pd.concat([openmeteo.fetch_live_forecast(c, model=SERVED_WEATHER_MODEL) for c in CITIES],
-                        ignore_index=True)
-    return load, weather
+def live_weather() -> pd.DataFrame:
+    return pd.concat([openmeteo.fetch_live_forecast(c, model=SERVED_WEATHER_MODEL) for c in CITIES],
+                     ignore_index=True)
+
+
+def archived_weather(issue: pd.Timestamp) -> pd.DataFrame:
+    """The served model's rows from the snapshot taken for this issue date (data/raw/weather_fc_live),
+    so the forecast is made from exactly the weather that was archived."""
+    from shef import store
+
+    snap = store.read("raw", "weather_fc_live")
+    day = str(issue.tz_convert(CENTRAL_TZ).date())
+    keep = (snap["issue_date_central"] == day) & (snap.get("model") == SERVED_WEATHER_MODEL)
+    rows = snap[keep]
+    if rows.empty:
+        raise SystemExit(f"no {SERVED_WEATHER_MODEL} snapshot for issue date {day}; run snapshot_forecast.py first")
+    print(f"weather: {SERVED_WEATHER_MODEL} snapshot fetched {rows['run_fetched_at_utc'].iloc[0]}")
+    return rows.drop(columns=["issue_date_central", "run_fetched_at_utc", "model"])
 
 
 def show(out: dict) -> None:
@@ -66,6 +80,8 @@ def main() -> int:
     p.add_argument("--target-day", type=pd.Timestamp, help="Central date; default tomorrow")
     p.add_argument("--dry-run", action="store_true", help="validate + predict in-process; log nothing")
     p.add_argument("--model-dir", type=Path, default=Path("build/model"), help="for --dry-run")
+    p.add_argument("--from-snapshot", action="store_true",
+                   help="use the archived gfs_seamless snapshot for this issue date instead of fetching")
     args = p.parse_args()
 
     now = pd.Timestamp.now(tz="UTC")
@@ -78,7 +94,8 @@ def main() -> int:
         print(f"note: running {now - issue} after issue time; load is still cut at issue time, "
               f"but the weather forecast is a later run than 10:00 Central would have seen")
 
-    load_raw, weather_raw = fetch(issue, now)
+    load_raw = gridstatus.fetch_load(issue - pd.Timedelta(days=10), now)
+    weather_raw = archived_weather(issue) if args.from_snapshot else live_weather()
     rows = build_live(issue, target_day, load_raw, weather_raw)
     print(f"built {len(rows)} rows for {target_day} as of {issue} (load cutoff {rows['cutoff_utc'].iloc[0]})")
 

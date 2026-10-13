@@ -104,4 +104,9 @@ uv run --env-file .env python scripts/forecast_day.py --dry-run         # tomorr
 **Deploying:**
 1. Run `infra/bootstrap.yaml` once in CloudShell.
 2. Then run the `deploy-api` workflow (input: model version).
-3. The `forecast` workflow calls the deployed API.
+3. The `daily` workflow runs at 10:00 Central:
+   - it snapshots the weather forecast to DVC;
+   - it forecasts tomorrow through the API from that same snapshot;
+   - it backfills actual load.
+
+   A fallback or a missing forecast fails the run.

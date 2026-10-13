@@ -15,8 +15,8 @@ of windows that straddle issue_time is not in ERA5 yet at serve time).
     uv run python scripts/snapshot_forecast.py --only-at-issue # no-op unless it is 10:xx Central
     uv run python scripts/snapshot_forecast.py --dry-run       # fetch + validate, store nothing
 
-Scheduled twice a day (15:00 and 16:00 UTC) so one run lands at 10:xx Central
-in both CST and CDT; --only-at-issue drops the other one.
+Run by .github/workflows/daily.yml at 10:xx Central, just before the forecast,
+which then reads the gfs_seamless rows back (forecast_day.py --from-snapshot).
 """
 from __future__ import annotations
 
