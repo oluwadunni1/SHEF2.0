@@ -105,7 +105,31 @@ Scores cover hours that have an archived forecast; Uri is excluded.
 
 **Holdout (Aug 2025 → Oct 2026, scored once):** champion **3.79% MAPE / 3.38% Peak-MAPE**, vs the baseline's 7.62% / 3.79%; RMSE 482 vs 1,013 MW, bias −0.17%. The production model is retrained on 2016-01-12 → 2026-10-09 and registered as **`shef2-day-ahead` v1** (MLflow pyfunc; bundle, trend line and forecast gate included).
 
-## 5. Still open
+## 5. P4 serving (2026-10-13)
+
+`shef2-day-ahead` v1 is served from AWS Lambda in eu-west-1, the same region as the Supabase database, as a container image with the model baked in.
+
+**Access:**
+- The Function URL uses **AWS_IAM** auth.
+- GitHub Actions assumes `shef2-github-forecast` (invoke only) or `shef2-github-deploy` through OIDC.
+- The trust is pinned to GitHub's immutable subject, `repo:oluwadunni1@171298512/SHEF2.0@1415648897:ref:refs/heads/main`. The first deploy failed against a name-only subject, which is why the ids are pinned.
+
+**Logging:** v1's `predictions` table was cleared (75 v1 rows) and extended with `issue_time_utc`, `lead_hours`, `weather_model` and `mlflow_run_id`.
+
+**Verified on 2026-10-13:**
+- An unsigned call gets `403`; a signed `/health` reports v1, run `7b8094a8…`.
+- The first cold start took 18.6 s, so the timeout was raised to 60 s.
+- An end-to-end `forecast` workflow run for 2026-10-13 logged 24 rows with every column filled.
+  - Re-running it logged 0 rows, so logging is idempotent.
+  - Lambda vs a local `Champion` on the logged inputs: max difference 4.9e-11 MW.
+  - The two hours already realised were 3.1% and 2.6% off.
+- Those rows were a smoke test made 17 h after issue time, with a later weather run than 10:00 would have seen. They were deleted, so live MAPE starts with the first scheduled run.
+
+**Deploy pitfalls hit:**
+- LightGBM needs `libgomp`, which the Lambda base image lacks.
+- Lambda needs an ECR repository policy to pull the image.
+
+## 6. Still open
 
 - [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
 - [ ] Hour-ahead go / no-go: a ~25 min delay makes it technically possible, but one sample is not enough. Parked as optional P7.
