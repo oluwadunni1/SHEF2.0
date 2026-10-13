@@ -141,6 +141,16 @@ footer a { color: var(--ink-2); }
     </div>
   </section>
 
+  <section class="grid">
+    <div class="card">
+      <h2>Load publishing latency</h2>
+      <div class="sub">Every feature cuts load off 1 hour before issue time, assuming GridStatus publishes each hour within 60 minutes.
+        Each daily load fetch tests that for free: the newest hour it sees was published <em>within</em> the first figure,
+        and the following hour was still missing <em>after</em> the second. A second figure ≥ 60 min would break the assumption.</div>
+      <div id="latency"></div>
+    </div>
+  </section>
+
   <footer>Built by the daily GitHub Actions job from a read-only database role. Source:
     <a href="https://github.com/oluwadunni1/SHEF2.0">github.com/oluwadunni1/SHEF2.0</a></footer>
 </main>
@@ -307,6 +317,16 @@ function render() {
     ["Weather input", "Open-Meteo gfs_seamless, archived at issue time"],
     ["Backtest (holdout)", back ? `MAPE ${pct(back.mape)} · Peak ${pct(back.peak_mape)} · RMSE ${fmt(back.rmse, 0)} MW · ${back.n_days} days` : "—"],
     ["Baseline on holdout", "MAPE 7.62% · RMSE 1,013 MW (freshest legal same-hour load)"]]);
+
+  const LT = document.getElementById("latency");
+  if (D.latency.length) {
+    const worst = Math.max(...D.latency.map(r => r.next_hour_late_by_min));
+    LT.appendChild(el("div", { className: "sub" }, `${D.latency.length} observation(s); longest an hour was seen still unpublished: ${fmt(worst, 0)} min after it ended ` +
+      (worst >= 60 ? "— the 1-hour cutoff is too tight." : "— within the 1-hour cutoff.")));
+    table(LT, ["Fetched (CT)", "Run", "Newest hour ends (CT)", "Published within", "Next hour missing after"],
+      D.latency.slice(0, 14).map(r => [ct(r.observed_at) + ":" + hourCT(r.observed_at).slice(3), r.run_mode, ct(r.newest_interval_end) + ":00",
+        fmt(r.published_within_min, 0) + " min", fmt(r.next_hour_late_by_min, 0) + " min"]));
+  } else empty(LT, "Recorded from the next daily run. P0 sample: 22–27 min.");
 
   const P = document.getElementById("promotions");
   if (D.promotions.length) table(P, ["Evaluated", "Window", "Champion MAPE", "Challenger MAPE", "Decision"],

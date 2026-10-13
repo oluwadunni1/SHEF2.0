@@ -98,3 +98,17 @@ def test_window_must_postdate_the_champion():
     tables = {"proxy": proxy, "obs": proxy}
     ev, model = promote.evaluate(tables, champion=None, champion_train_end=date(2026, 10, 9), as_of=date(2026, 10, 31))
     assert ev.decision == "insufficient" and model is None
+
+
+def test_latency_brackets_the_newest_published_hour():
+    import pandas as pd
+
+    from shef.monitoring import latency
+
+    ends = pd.date_range("2026-10-14 13:00", periods=3, freq="h", tz="UTC")
+    raw = pd.DataFrame({"interval_start_utc": ends - pd.Timedelta(hours=1), "interval_end_utc": ends,
+                        "south_central": [1.0, 2.0, float("nan")]})   # the 15:00 hour is not in yet
+    obs = latency.observation(raw, pd.Timestamp("2026-10-14 15:07", tz="UTC"), "issue")
+    assert obs["newest_interval_end"] == "2026-10-14T14:00:00+00:00" and obs["run_mode"] == "issue"
+    assert latency.bounds(obs) == (7.0, 67.0)   # next hour still missing 7 min after it ended; newest within 67
+    assert latency.observation(raw.iloc[:0], pd.Timestamp.now(tz="UTC"), "issue") is None

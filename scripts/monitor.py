@@ -1,6 +1,7 @@
 """
 monitor.py — daily monitoring after the forecast: weather-forecast error of
-what was served, input drift, ERCOT's own forecast for tomorrow (benchmark;
+what was served, input drift, GridStatus publishing latency (from the
+forecast's own load fetch), ERCOT's own forecast for tomorrow (benchmark;
 only while the GridStatus quota has room), and the quota itself. Writes to
 the monitoring schema with the monitor_writer login (MONITOR_DATABASE_URL), which cannot touch predictions.
 
@@ -20,7 +21,7 @@ import psycopg
 
 from shef import store
 from shef.config import CENTRAL_TZ, REPORTS
-from shef.monitoring import benchmark, drift, weather
+from shef.monitoring import benchmark, drift, latency, weather
 from shef.sources import gridstatus
 from shef.timestamps import issue_time_utc
 
@@ -29,6 +30,12 @@ INSERT INTO monitoring.weather_checks (issue_date, comparison, variable, n_hours
 VALUES (%(issue_date)s, %(comparison)s, %(variable)s, %(n_hours)s, %(mae)s, %(bias)s, %(p95_abs)s)
 ON CONFLICT (issue_date, comparison, variable) DO UPDATE
 SET n_hours = EXCLUDED.n_hours, mae = EXCLUDED.mae, bias = EXCLUDED.bias, p95_abs = EXCLUDED.p95_abs, computed_at = now()
+"""
+
+INSERT_LATENCY = """
+INSERT INTO monitoring.load_latency (observed_at, newest_interval_end, run_mode)
+VALUES (%(observed_at)s, %(newest_interval_end)s, %(run_mode)s)
+ON CONFLICT (observed_at) DO NOTHING
 """
 
 UPSERT_DRIFT = """
@@ -91,6 +98,11 @@ def main() -> None:
         print(f"gridstatus quota: {usage['requests_used']}/{usage['requests_limit']} requests, "
               f"{usage['rows_used']:,}/{usage['rows_limit']:,} rows this period")
 
+        obs = latency.load()
+        if obs:
+            late, within = latency.bounds(obs)
+            print(f"load latency: newest hour published within {within:.0f} min; next hour > {late:.0f} min late")
+
         if args.dry_run:
             print("dry run: nothing written")
             return
@@ -101,6 +113,8 @@ def main() -> None:
                 conn.execute(UPSERT_DRIFT, {**r, "computed_on": today})
             benchmark.store(conn, ercot, issue)
             benchmark.record_usage(conn, usage)
+            if obs:
+                conn.execute(INSERT_LATENCY, obs)
 
 
 if __name__ == "__main__":

@@ -233,8 +233,26 @@ Scores cover hours that have an archived forecast; Uri is excluded.
 
 None of this was tuned on the holdout. Any challenger goes through the monthly promotion rule.
 
-## 10. Still open
+## 10. Hardening before the write-up (2026-10-13)
 
-- [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample). Only needed if hour-ahead is reopened (section 8).
+- **The API no longer holds the postgres URL.** `api_writer` (`sql/006`) can insert forecasts and fill `actual_load_mw`, nothing else. A probe run as the role, then rolled back, gave:
+  - allowed: the insert, an idempotent re-insert (0 rows), and the actuals update;
+  - denied: inserting a `backtest-*` row (RLS), reading features, DELETE, changing a forecast, and reading the monitoring schema;
+  - backtest rows are invisible to it (count 0).
+
+  All four components now use their own role.
+- **Latency is measured by every run.** `forecast_day.py` records the newest hour each load fetch returns, and `monitor.py` stores it in `monitoring.load_latency`. One fetch at T, with the newest hour ending at E, brackets the latency: the hour ending E took at most T − E, and the next hour took more than T − E − 1 h. This builds up the multi-day evidence the single P0 sample lacked, at zero extra GridStatus requests. The dashboard flags any observation that would break the 1 h cutoff.
+- **Failures open an issue.** In a scheduled `daily` run, any of these opens an `ops-alert` GitHub issue (one per day; later slots comment on it):
+  - a failed or fallback forecast;
+  - a failed dashboard;
+  - a monitoring step that failed under `continue-on-error`.
+- **README:** model card, a limitations section, and a least-privilege role table.
+
+## 11. Still open
+
+- [ ] GridStatus publish latency p99: accumulating daily in `monitoring.load_latency` (section 10). Needs a few weeks before it can be called a p99.
+- [ ] 7 consecutive unattended `daily` runs (P5 definition of done). The first scheduled run is 2026-10-13 15:07 UTC.
+- [ ] A day when GitHub drops every cron slot opens no issue. It shows only as a stale "latest forecast" on the dashboard.
+- [ ] Prediction intervals; a level-adaptive challenger for record-demand periods (README limitations).
 - [x] Confirm Open-Meteo `previous_day1` lead definition: predicted 24 h before valid time
 - [x] Weather model: `gfs_seamless` (identical to `best_match` in the archive; pinned for live parity)

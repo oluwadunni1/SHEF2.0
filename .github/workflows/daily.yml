@@ -11,8 +11,9 @@
 #   15:07 / 16:07 UTC  whichever is 10:xx Central (CDT / CST) is the issue run
 #   17:37 UTC          catch-up: snapshot only if today's is missing, then
 #                      forecast (idempotent: logs nothing if already done)
-# A fallback forecast (missing forecast temperature) exits 2 and fails the run,
-# so GitHub's failure email is the alert.
+# A fallback forecast (missing forecast temperature) exits 2 and fails the run.
+# Any failed scheduled run, including a monitoring step that failed quietly
+# under continue-on-error, opens (or comments on) an "ops-alert" issue.
 #
 # Credentials: the AWS_* secrets are Cloudflare R2 keys for DVC and are given
 # only to the DVC steps. Real AWS access is the OIDC forecast role, assumed
@@ -45,6 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       mode: ${{ steps.slot.outputs.mode }}
+      forecast: ${{ steps.forecast.outcome }}
+      monitor: ${{ steps.monitor.outcome }}
     timeout-minutes: 30
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
@@ -127,13 +130,16 @@ jobs:
           aws-region: eu-west-1
 
       - name: Forecast tomorrow and send actuals
+        id: forecast
         if: steps.slot.outputs.mode == 'issue' || steps.slot.outputs.mode == 'catchup'
         env:
           GRIDSTATUS_API_KEY: ${{ secrets.GRIDSTATUS_API_KEY }}
           SHEF_API_URL: ${{ vars.SHEF_API_URL }}
+          RUN_MODE: ${{ steps.slot.outputs.mode }}
         run: uv run python scripts/forecast_day.py --from-snapshot
 
-      - name: Monitoring (weather error, drift)
+      - name: Monitoring (weather error, drift, latency, ERCOT)
+        id: monitor
         if: steps.slot.outputs.mode == 'issue' || steps.slot.outputs.mode == 'catchup'
         continue-on-error: true   # best effort: never fails the forecast
         env:
@@ -176,3 +182,47 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v5.0.1
 
+
+  # Failures become a GitHub issue on the repo, not only an email to whoever
+  # last edited the cron: one open issue per day, later failures comment on it.
+  alert:
+    needs: [day-ahead, dashboard]
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      (needs.day-ahead.result == 'failure' || needs.dashboard.result == 'failure' ||
+       needs.day-ahead.outputs.monitor == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      MODE: ${{ needs.day-ahead.outputs.mode }}
+      FORECAST: ${{ needs.day-ahead.outputs.forecast }}
+      MONITOR: ${{ needs.day-ahead.outputs.monitor }}
+      DAY_AHEAD: ${{ needs.day-ahead.result }}
+      DASHBOARD: ${{ needs.dashboard.result }}
+    steps:
+      - name: Open or update the day's ops-alert issue
+        run: |
+          day=$(TZ=America/Chicago date +%Y-%m-%d)
+          title="daily run failed: $day"
+          {
+            echo "Run: $RUN_URL ($MODE slot, $(date -u '+%H:%M UTC'))"
+            echo
+            echo "| part | result |"
+            echo "|---|---|"
+            echo "| day-ahead job | $DAY_AHEAD |"
+            echo "| forecast (exit 2 = baseline fallback served) | ${FORECAST:-not run} |"
+            echo "| monitoring (best effort) | ${MONITOR:-not run} |"
+            echo "| dashboard | $DASHBOARD |"
+            echo
+            echo "A failed 10:00 slot is retried by the 17:37 UTC catch-up; close this once a run for $day is green."
+          } > body.md
+          body=$(cat body.md)
+          gh label create ops-alert --color B60205 --description "Automated: a scheduled run failed" --force
+          n=$(gh issue list --label ops-alert --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; echo "commented on #$n"
+          else gh issue create --title "$title" --label ops-alert --body "$body"; fi

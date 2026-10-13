@@ -26,6 +26,7 @@ import pandas as pd
 from shef.align import align_load
 from shef.config import CENTRAL_TZ, CITIES
 from shef.features.live import build_live
+from shef.monitoring import latency
 from shef.serving import client
 from shef.serving.schema import SERVED_WEATHER_MODEL
 from shef.sources import gridstatus, openmeteo
@@ -97,6 +98,13 @@ def main() -> int:
               f"but the weather forecast is a later run than 10:00 Central would have seen")
 
     load_raw = gridstatus.fetch_load(issue - pd.Timedelta(days=10), now)
+    obs = latency.observation(load_raw, pd.Timestamp.now(tz="UTC"), os.environ.get("RUN_MODE", "manual"))
+    if obs:
+        late, within = latency.bounds(obs)
+        nxt = f"the next hour still missing {late:.0f} min after it ended" if late >= 0 else "the next hour has not ended yet"
+        print(f"gridstatus: newest hour ends {obs['newest_interval_end']} (published within {within:.0f} min; {nxt})")
+        if not args.dry_run:
+            latency.save(obs)   # monitor.py stores it (monitoring.load_latency)
     weather_raw = archived_weather(issue) if args.from_snapshot else live_weather()
     rows = build_live(issue, target_day, load_raw, weather_raw)
     print(f"built {len(rows)} rows for {target_day} as of {issue} (load cutoff {rows['cutoff_utc'].iloc[0]})")
