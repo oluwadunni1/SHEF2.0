@@ -62,7 +62,7 @@ jobs:
 
       - name: Container smoke test (Lambda runtime emulator, Function URL event)
         run: |
-          docker run -d --name api -p 9000:8080 -e API_KEY=local-test-key-0123456789abcdef0123 shef2-api:local
+          docker run -d --name api -p 9000:8080 shef2-api:local
           trap 'echo "--- container log"; docker logs api 2>&1 | tail -40' EXIT
           sleep 3
           EVENT='{"version":"2.0","routeKey":"$default","rawPath":"/health","rawQueryString":"",
@@ -99,19 +99,18 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               "ImageUri=${{ steps.image.outputs.uri }}" \
-              "DatabaseUrl=${{ secrets.SUPABASE_DATABASE_URL }}" \
-              "ApiKey=${{ secrets.SHEF_API_KEY }}"
+              "DatabaseUrl=${{ secrets.SUPABASE_DATABASE_URL }}"
 
-      - name: Smoke test /health
+      - name: Smoke test /health (signed with this job's role)
         run: |
-          URL=$(aws cloudformation describe-stacks --stack-name shef2-api \
-                --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)
+          URL=$(aws cloudformation describe-stacks --stack-name shef2-api                 --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)
           echo "API: $URL" >> "$GITHUB_STEP_SUMMARY"
-          START=$(date +%s.%N)
-          BODY=$(curl -sf --retry 3 --retry-delay 5 "${URL}health")
-          echo "cold /health in $(echo "$(date +%s.%N) - $START" | bc) s: $BODY"
-          echo "$BODY" | python3 -c "
-          import json, os, sys
-          h = json.load(sys.stdin)
+          code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}health")
+          echo "unsigned request -> HTTP $code (expect 403)"; test "$code" = 403
+          uv run python -c "
+          import os, sys, time
+          from shef.serving import client
+          t = time.time(); h = client.get(sys.argv[1], '/health')
           assert h['status'] == 'ok' and h['model_version'] == os.environ['MODEL_VERSION'], h
-          print('serving', h['model_name'], 'v' + h['model_version'], 'run', h['mlflow_run_id'], '|', len(h['features']), 'features')"
+          print(f'signed /health in {time.time() - t:.1f}s: serving', h['model_name'], 'v' + h['model_version'],
+                'run', h['mlflow_run_id'], '|', len(h['features']), 'features')" "$URL"

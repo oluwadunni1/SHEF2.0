@@ -4,9 +4,13 @@ predict with the champion (or the baseline, if the forecast gate trips), log
 every hour to Supabase, return the forecast. Feature engineering happens in
 the client (scripts/forecast_day.py -> features.live.build_live).
 
-    GET  /health     public: which model is serving
-    POST /forecast   x-api-key: one day of rows -> 23-25 hourly forecasts
-    POST /actuals    x-api-key: realised load -> fills actual_load_mw
+    GET  /health     which model is serving
+    POST /forecast   one day of rows -> 23-25 hourly forecasts
+    POST /actuals    realised load -> fills actual_load_mw
+
+Authentication is not in this code: the Function URL uses AWS_IAM auth, so
+Lambda rejects any request not SigV4-signed by a principal allowed to invoke
+it (the GitHub Actions OIDC role) before the app runs. No shared secret exists.
 
 On Lambda, `handler` (Mangum) adapts Function URL events to ASGI. The model is
 baked into the image at /opt/model by the deploy workflow and loaded once per
@@ -18,12 +22,11 @@ cold start. Locally:
 import json
 import logging
 import os
-import secrets
 from pathlib import Path
 from typing import Callable
 
 import pandas as pd
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -39,17 +42,11 @@ BASELINE_NAME = "baseline_same_hour_latest"
 BASELINE_COLUMN = "load_same_hour_latest"
 
 
-def create_app(champion: Champion, meta: dict, api_key: str | None,
+def create_app(champion: Champion, meta: dict,
                log_predictions: Callable[[list[dict]], int] = db.log_predictions,
                log_actuals: Callable[[list[dict]], int] = db.log_actuals) -> FastAPI:
     app = FastAPI(title="SHEF 2.0 day-ahead load forecast", version=str(meta["model_version"]))
     Request_ = build_request_model(champion.features)
-
-    def require_key(x_api_key: str | None = Header(None)):
-        if not api_key:
-            raise HTTPException(503, "API key not configured")
-        if not x_api_key or not secrets.compare_digest(x_api_key, api_key):
-            raise HTTPException(401, "missing or wrong x-api-key")
 
     @app.exception_handler(RequestValidationError)
     async def _invalid(request: Request, exc: RequestValidationError):
@@ -62,7 +59,7 @@ def create_app(champion: Champion, meta: dict, api_key: str | None,
                               mlflow_run_id=meta.get("mlflow_run_id"), trained_through=meta.get("trained_through"),
                               weather_model=meta["weather_model"], features=champion.features)
 
-    @app.post("/forecast", response_model=ForecastResponse, dependencies=[Depends(require_key)])
+    @app.post("/forecast", response_model=ForecastResponse)
     def forecast(body: Request_):  # type: ignore[valid-type]
         rows = body.frame()
         status, reason = "ok", None
@@ -104,7 +101,7 @@ def create_app(champion: Champion, meta: dict, api_key: str | None,
             predictions=[HourForecast(ts_utc=r["target_timestamp"], lead_hours=r["lead_hours"],
                                       load_mw=round(r["predicted_load_mw"], 1)) for r in records])
 
-    @app.post("/actuals", response_model=ActualsResponse, dependencies=[Depends(require_key)])
+    @app.post("/actuals", response_model=ActualsResponse)
     def actuals(body: ActualsRequest):
         updated = log_actuals([{"ts_utc": a.ts_utc, "load_mw": a.load_mw} for a in body.actuals])
         return ActualsResponse(received=len(body.actuals), updated=updated)
@@ -129,7 +126,7 @@ def _default_app() -> FastAPI | None:
     if not (model_dir / "model_meta.json").exists():
         return None  # imported by tests or tooling without a baked model
     champion, meta = load_model_dir(model_dir)
-    return create_app(champion, meta, os.environ.get("API_KEY"))
+    return create_app(champion, meta)
 
 
 app = _default_app()

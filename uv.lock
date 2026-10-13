@@ -4206,6 +4206,7 @@ name = "shef2-0"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "botocore" },
     { name = "catboost" },
     { name = "gridstatusio" },
     { name = "holidays" },
@@ -4247,6 +4248,7 @@ serve = [
 
 [package.metadata]
 requires-dist = [
+    { name = "botocore", specifier = ">=1.43.106" },
     { name = "catboost", specifier = ">=1.2.10" },
     { name = "gridstatusio", specifier = ">=0.16.0" },
     { name = "holidays", specifier = ">=0.106" },

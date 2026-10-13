@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  SHEF 2.0 forecast API: one Lambda (container image) behind a Function URL.
+  SHEF 2.0 forecast API: one Lambda (container image) behind a Function URL (AWS_IAM auth).
   Deployed by .github/workflows/deploy_api.yml; the image tag is the git commit.
 
 Parameters:
@@ -9,10 +9,6 @@ Parameters:
   DatabaseUrl:
     Type: String
     NoEcho: true
-  ApiKey:
-    Type: String
-    NoEcho: true
-    MinLength: 32
 
 Resources:
   Logs:
@@ -36,29 +32,15 @@ Resources:
       Environment:
         Variables:
           DATABASE_URL: !Ref DatabaseUrl
-          API_KEY: !Ref ApiKey
 
   Url:
     Type: AWS::Lambda::Url
     Properties:
       TargetFunctionArn: !Ref Function
-      AuthType: NONE   # /health is public; /forecast and /actuals check x-api-key in the app
-
-  PublicUrl:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref Function
-      Action: lambda:InvokeFunctionUrl
-      Principal: "*"
-      FunctionUrlAuthType: NONE
-
-  PublicUrlInvoke:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref Function
-      Action: lambda:InvokeFunction
-      Principal: "*"
-      InvokedViaFunctionUrl: true
+      # Lambda rejects any request not SigV4-signed by a principal whose IAM policy
+      # allows lambda:InvokeFunctionUrl on this function (same account: no
+      # resource policy needed). The app itself holds no credentials to check.
+      AuthType: AWS_IAM
 
 Outputs:
   FunctionUrl:

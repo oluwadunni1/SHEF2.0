@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   SHEF 2.0, one-time bootstrap (run by hand in CloudShell). Creates what the
-  deploy workflow cannot create for itself: the GitHub OIDC trust, the deploy
-  role it assumes, the ECR repository, and the Lambda execution role.
+  deploy workflow cannot create for itself: the GitHub OIDC trust, two roles
+  GitHub Actions assumes (deploy: build + deploy the stack; forecast: only
+  invoke the API), the ECR repository, and the Lambda execution role.
   No long-lived AWS keys are stored anywhere.
 
 Parameters:
@@ -112,10 +113,38 @@ Resources:
                 Action: iam:PassRole
                 Resource: !GetAtt ExecutionRole.Arn
 
+  ForecastRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: shef2-github-forecast
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: invoke-shef2-api
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [lambda:InvokeFunctionUrl, lambda:InvokeFunction]
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:shef2-api
+
 Outputs:
   DeployRoleArn:
     Description: GitHub secret AWS_ROLE_ARN
     Value: !GetAtt DeployRole.Arn
+  ForecastRoleArn:
+    Description: GitHub secret AWS_FORECAST_ROLE_ARN
+    Value: !GetAtt ForecastRole.Arn
   RepositoryUri:
     Value: !GetAtt Repository.RepositoryUri
   ExecutionRoleArn:

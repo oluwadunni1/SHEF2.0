@@ -33,18 +33,34 @@ def actuals_payload(load: pd.DataFrame) -> dict:
     return {"actuals": [{"ts_utc": t.isoformat(), "load_mw": float(v)} for t, v in zip(ok["ts_utc"], ok["load_mw"])]}
 
 
-def get(url: str, path: str, timeout: float = 60) -> dict:
+def _signed(method: str, url: str, body: dict | None, timeout: float) -> dict:
+    """SigV4-signed call to the Function URL (AuthType AWS_IAM). Credentials come
+    from botocore's default chain: the OIDC role in GitHub Actions."""
+    import json
+
+    import botocore.session
     import requests
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
 
-    r = requests.get(url.rstrip("/") + path, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
-
-
-def post(url: str, path: str, body: dict, api_key: str, timeout: float = 60) -> dict:
-    import requests
-
-    r = requests.post(url.rstrip("/") + path, json=body, headers={"x-api-key": api_key}, timeout=timeout)
+    session = botocore.session.get_session()
+    creds = session.get_credentials()
+    if creds is None:
+        raise RuntimeError("no AWS credentials: the API only accepts SigV4-signed requests")
+    region = url.split(".lambda-url.")[1].split(".")[0]
+    data = json.dumps(body) if body is not None else None
+    req = AWSRequest(method=method, url=url, data=data,
+                     headers={"Content-Type": "application/json"} if data else {})
+    SigV4Auth(creds.get_frozen_credentials(), "lambda", region).add_auth(req)
+    r = requests.request(method, url, data=data, headers=dict(req.headers), timeout=timeout)
     if r.status_code >= 400:
-        raise RuntimeError(f"{path} -> HTTP {r.status_code}: {r.text[:2000]}")
+        raise RuntimeError(f"{method} {url} -> HTTP {r.status_code}: {r.text[:2000]}")
     return r.json()
+
+
+def get(url: str, path: str, timeout: float = 60) -> dict:
+    return _signed("GET", url.rstrip("/") + path, None, timeout)
+
+
+def post(url: str, path: str, body: dict, timeout: float = 60) -> dict:
+    return _signed("POST", url.rstrip("/") + path, body, timeout)

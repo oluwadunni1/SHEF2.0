@@ -5,6 +5,7 @@ description = "Day-ahead hourly load forecast for ERCOT South Central"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "botocore>=1.43.106",
     "catboost>=1.2.10",
     "gridstatusio>=0.16.0",
     "holidays>=0.106",

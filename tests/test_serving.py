@@ -13,7 +13,6 @@ from shef.serving import client, db, schema
 from shef.serving.app import BASELINE_NAME, create_app
 from tests.test_features import synthetic_joined
 
-KEY = "test-key"
 META = {"model_name": "shef2-day-ahead", "model_version": "7", "mlflow_run_id": "abc",
         "trained_through": "2025-07-31", "weather_model": "gfs_seamless"}
 
@@ -38,7 +37,7 @@ def api(setup):
         logged.extend(records)
         return len(records)
 
-    app = create_app(champ, META, KEY, log_predictions=fake_log,
+    app = create_app(champ, META, log_predictions=fake_log,
                      log_actuals=lambda a: actuals.extend(a) or len(a))
     return TestClient(app), champ, days, logged, actuals
 
@@ -47,8 +46,8 @@ def body_for(day_rows, champ):
     return client.payload(day_rows, champ.features)
 
 
-def post(c, body, key=KEY):
-    return c.post("/forecast", json=body, headers={"x-api-key": key} if key else {})
+def post(c, body):
+    return c.post("/forecast", json=body)
 
 
 def test_health_is_open_and_names_the_model(api):
@@ -57,11 +56,27 @@ def test_health_is_open_and_names_the_model(api):
     assert h["model_version"] == "7" and h["features"] == champ.features
 
 
-def test_key_required(api):
-    c, champ, days, *_ = api
-    body = body_for(days[date(2025, 8, 5)], champ)
-    assert post(c, body, key=None).status_code == 401
-    assert post(c, body, key="wrong").status_code == 401
+def test_function_url_region_is_parsed_for_signing(monkeypatch):
+    seen = {}
+
+    class Creds:
+        def get_frozen_credentials(self):
+            from botocore.credentials import ReadOnlyCredentials
+            return ReadOnlyCredentials("AKIDEXAMPLE", "secret", None)
+
+    import botocore.session
+    import requests
+    monkeypatch.setattr(botocore.session.Session, "get_credentials", lambda self: Creds())
+
+    def fake_request(method, url, data=None, headers=None, timeout=None):
+        seen.update(method=method, url=url, headers=headers)
+        r = requests.Response(); r.status_code = 200; r._content = b"{}"
+        return r
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    client.post("https://abc.lambda-url.eu-west-1.on.aws/", "/forecast", {"x": 1})
+    auth = seen["headers"]["Authorization"]
+    assert seen["url"].endswith("/forecast") and "/eu-west-1/lambda/aws4_request" in auth
 
 
 @pytest.mark.parametrize("day", [date(2025, 8, 5), date(2025, 11, 2)])
@@ -120,7 +135,7 @@ def test_logging_failure_still_returns_the_forecast(setup):
     def broken(records):
         raise ConnectionError("db down")
 
-    c = TestClient(create_app(champ, META, KEY, log_predictions=broken))
+    c = TestClient(create_app(champ, META, log_predictions=broken))
     out = post(c, body_for(days[date(2025, 8, 5)], champ)).json()
     assert out["status"] == "ok" and out["logged"] == 0 and "logging failed" in out["warning"]
 
@@ -128,10 +143,9 @@ def test_logging_failure_still_returns_the_forecast(setup):
 def test_actuals(api):
     c, *_, actuals = api
     body = {"actuals": [{"ts_utc": "2025-08-05T05:00:00+00:00", "load_mw": 9000.0}]}
-    r = c.post("/actuals", json=body, headers={"x-api-key": KEY})
+    r = c.post("/actuals", json=body)
     assert r.json() == {"received": 1, "updated": 1} and actuals[0]["load_mw"] == 9000.0
-    assert c.post("/actuals", json={"actuals": [{"ts_utc": "2025-08-05T05:00:00+00:00", "load_mw": -1}]},
-                  headers={"x-api-key": KEY}).status_code == 422
+    assert c.post("/actuals", json={"actuals": [{"ts_utc": "2025-08-05T05:00:00+00:00", "load_mw": -1}]}).status_code == 422
 
 
 def test_bounds_match_the_clean_gate():

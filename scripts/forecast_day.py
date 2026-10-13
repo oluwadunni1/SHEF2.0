@@ -8,7 +8,7 @@ build the feature rows, ask the API for the forecast, report realised load.
     4. POST /actuals with the fetched load                     (fills actual_load_mw)
 
     uv run --env-file .env python scripts/forecast_day.py --dry-run   # in-process API, nothing logged
-    uv run --env-file .env python scripts/forecast_day.py             # SHEF_API_URL + SHEF_API_KEY
+    python scripts/forecast_day.py   # SHEF_API_URL; AWS credentials allowed to invoke it (CI: OIDC role)
 
 Exit code 2 when the API served the baseline fallback, so a scheduled run that
 fell back shows as failed (and GitHub's failure email is the alert).
@@ -57,7 +57,7 @@ def local_api(model_dir: Path):
     from shef.serving.app import create_app, load_model_dir
 
     champion, meta = load_model_dir(model_dir)
-    app = create_app(champion, meta, "dry-run", log_predictions=lambda r: 0, log_actuals=lambda a: 0)
+    app = create_app(champion, meta, log_predictions=lambda r: 0, log_actuals=lambda a: 0)
     return TestClient(app), champion.features
 
 
@@ -84,17 +84,17 @@ def main() -> int:
 
     if args.dry_run:
         api, features = local_api(args.model_dir)
-        r = api.post("/forecast", json=client.payload(rows, features), headers={"x-api-key": "dry-run"})
+        r = api.post("/forecast", json=client.payload(rows, features))
         if r.status_code != 200:
             print(f"payload rejected: HTTP {r.status_code} {r.text[:2000]}")
             return 1
         out = r.json()
     else:
-        url, key = os.environ["SHEF_API_URL"], os.environ["SHEF_API_KEY"]
+        url = os.environ["SHEF_API_URL"]
         health = client.get(url, "/health")
         print(f"API serving {health['model_name']} v{health['model_version']}")
-        out = client.post(url, "/forecast", client.payload(rows, health["features"]), key)
-        act = client.post(url, "/actuals", client.actuals_payload(align_load(load_raw)), key)
+        out = client.post(url, "/forecast", client.payload(rows, health["features"]))
+        act = client.post(url, "/actuals", client.actuals_payload(align_load(load_raw)))
         print(f"actuals: {act['updated']} of {act['received']} hours filled in")
     show(out)
     return 2 if out["status"] == "fallback" else 0
