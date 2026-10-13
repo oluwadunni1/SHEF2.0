@@ -35,13 +35,23 @@ def hourly_vars(source: str) -> list[str]:
     return list(WEATHER_VARS)
 
 
+RETRIES = 4
+
+
 def _get(url: str, params: dict) -> requests.Response:
-    for attempt in range(4):
-        resp = requests.get(url, params=params, timeout=120)
-        if resp.status_code != 429:
-            return resp
+    """Retries rate limits (429), server errors (5xx) and network failures (timeouts,
+    dropped connections) with a growing pause; the last failure is raised or returned."""
+    for attempt in range(RETRIES):
+        last = attempt == RETRIES - 1
+        try:
+            resp = requests.get(url, params=params, timeout=120)
+        except (requests.Timeout, requests.ConnectionError):
+            if last:
+                raise
+        else:
+            if resp.status_code != 429 and resp.status_code < 500 or last:
+                return resp
         time.sleep(30 * (attempt + 1))
-    return resp
 
 
 def _to_frame(payload: dict, city: str, source: str) -> pd.DataFrame:
