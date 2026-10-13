@@ -1,0 +1,37 @@
+# Day-ahead forecast: build the feature rows from what is known at 10:00
+# Central, call the deployed API (SigV4, forecast-only OIDC role), then send
+# realised load so actual_load_mw fills in. Manual for now; P5 adds the
+# 10:00 Central schedule.
+name: forecast
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_day:
+        description: Central date YYYY-MM-DD (default tomorrow)
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - run: uv sync --frozen
+
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_FORECAST_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Forecast
+        env:
+          GRIDSTATUS_API_KEY: ${{ secrets.GRIDSTATUS_API_KEY }}
+          SHEF_API_URL: ${{ vars.SHEF_API_URL }}
+          TARGET_DAY: ${{ inputs.target_day }}
+        run: uv run python scripts/forecast_day.py ${TARGET_DAY:+--target-day "$TARGET_DAY"}

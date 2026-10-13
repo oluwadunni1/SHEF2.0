@@ -114,7 +114,7 @@ jobs:
       - name: Smoke test /health (signed with this job's role)
         run: |
           URL=$(aws cloudformation describe-stacks --stack-name shef2-api                 --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)
-          echo "API: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "API: $URL" | tee -a "$GITHUB_STEP_SUMMARY"
           code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}health")
           echo "unsigned request -> HTTP $code (expect 403)"; test "$code" = 403
           uv run python -c "

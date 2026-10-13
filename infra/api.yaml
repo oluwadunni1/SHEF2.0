@@ -28,7 +28,7 @@ Resources:
       Role: !ImportValue shef2-api-exec-role
       Architectures: [x86_64]
       MemorySize: 1024
-      Timeout: 30
+      Timeout: 60   # cold start (image pull + pandas/lightgbm import) measured 18.6 s
       Environment:
         Variables:
           DATABASE_URL: !Ref DatabaseUrl
