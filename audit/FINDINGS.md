@@ -148,7 +148,44 @@ Scores cover hours that have an archived forecast; Uri is excluded.
 
 **Verified:** a dry run passed. It pulled from R2, snapshotted both models with 100% of temperatures present, and made a signed `/health` call with the forecast role. The first scheduled run is 2026-10-13 15:07 UTC, for 2026-10-14.
 
-## 7. Still open
+## 7. P6 monitoring and promotion (2026-10-13)
+
+**Storage:**
+- Everything lives in a `monitoring` schema, which Supabase's REST API does not expose.
+- Two scoped logins:
+  - `dashboard_reader` can read the views only;
+  - `monitor_writer` can write the three monitoring tables.
+- Neither can touch `predictions`. Both were tested with their own connections.
+
+**Backtest as reference:**
+- The holdout model from MLflow was re-run on the holdout feature rows and reproduced the logged OOF with a 0.0 MW difference.
+- Loaded as `backtest-1` (10,224 rows).
+- `monitoring.v_summary` returns 3.79% / 3.38% / 482 MW / −0.17%, identical to P3, which ties the SQL definitions to `metrics.py` (also a test).
+
+**Drift: textbook PSI does not work here.**
+- With 0.1 / 0.25 thresholds, every 14-day window "drifts", including in-sample ones (PSI 1–7 on `tmax`).
+- Thresholds are therefore calibrated per feature on 1,082 historical windows of archived-forecast rows: watch above p95, drift above p99.
+- `tmax`, `tmin`, `temp_spike_vs_mean` and `last_known_roll_mean_168` are dropped. With about 14 distinct values per window their PSI saturates near the 10-bin ceiling (calibrated drift thresholds of 7.2–8.4), so they could never alert.
+- What's left (`temp_c`, `cdd_x_hour`, `load_same_hour_latest`, `load_lag_168`):
+  - stays quiet on Jul and Feb 2026;
+  - flags °F temperatures and a frozen load feed (PSI 8.3);
+  - flags the two weeks to 2026-10-09 on load. That's genuine growth above previous Octobers, consistent with the early-September under-forecasts.
+
+**Promotion:**
+- Rolling origin: 28 labelled days, challenger trained through window start − 8 days.
+- Rule: at least 0.10 points of MAPE gain and a Peak-MAPE no worse.
+- The first real verdict needs labels through 2026-11-06. The 2026-11-01 run will report "insufficient"; December is the first real test.
+- Rehearsal (champion refit through 2026-07-31, challenger through 08-26, window Sep 3–30):
+
+  | | MAPE | Peak-MAPE |
+  |---|---|---|
+  | Champion | 3.27% | 2.93% |
+  | Challenger | 3.23% | 3.00% |
+
+  The verdict is **keep**. A month of extra data is worth about nothing, and the margin stops churn.
+- v1 now carries the `@champion` alias, and `deploy_api` deploys whatever the alias points to.
+
+## 8. Still open
 
 - [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
 - [ ] Hour-ahead go / no-go: a ~25 min delay makes it technically possible, but one sample is not enough. Parked as optional P7.

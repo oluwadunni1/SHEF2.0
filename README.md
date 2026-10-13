@@ -72,6 +72,25 @@ flowchart LR
   - After the deploy, it checks that an unsigned call gets `403` and a signed one reports the expected version.
 - **Batch problem, service boundary.** A daily forecast is batch prediction. The API exists to give the model a versioned, validated boundary, and so on-demand or what-if requests need no new code.
 
+## Monitoring and promotion
+
+**Live dashboard: https://oluwadunni1.github.io/SHEF2.0/** It's rebuilt after every daily run from a read-only database role.
+
+- **Accuracy.** Live 30-day MAPE, Peak-MAPE, RMSE and bias next to the holdout backtest. The backtest rows sit in the same table under `backtest-1`, and the SQL views reproduce P3's 3.79% / 3.38% / 482 MW exactly.
+- **Served weather.** Each archived `gfs_seamless` snapshot is scored once ERA5 is final:
+  - against what was observed;
+  - against the archived forecast the model was trained on. This checks that the training proxy matches what serving actually sees.
+- **Input drift.** PSI on the hourly inputs against the same calendar month in the last 3 training years.
+  - Textbook PSI thresholds flag ordinary weather every day here. So the thresholds are **calibrated** on 1,000+ historical 14-day windows: watch above the 95th percentile, drift above the 99th.
+  - Daily-level features are excluded because their PSI saturates.
+  - It catches unit errors and frozen feeds (PSI ≈ 8.3). It also flagged real early-October 2026 load growth.
+- **Promotion (monthly).**
+  - The data is refreshed through the DVC pipeline.
+  - The champion's recipe is retrained on newer data, and both models are scored on the latest 28 labelled days neither has seen (rolling origin).
+  - The challenger is promoted only if MAPE improves by ≥ 0.10 points without a worse Peak-MAPE.
+  - A promotion registers vN, moves the MLflow `@champion` alias and redeploys.
+  - A rehearsal on Sep 2026 kept the champion: 4 more weeks of training data gave −0.04 points of MAPE and a worse peak. The margin is there to prevent that kind of churn.
+
 ## Layout
 
 ```
@@ -83,6 +102,7 @@ src/shef/
   features/     as-of views, build_features, bundle, replay, live path, LSTM sequences
   models/       folds, metrics, targets, GBDT/LSTM builders, CV, ensemble, tracking, predict.Champion
   serving/      FastAPI app, request schema, Supabase logging, signed client
+  monitoring/   served-weather error, calibrated drift, champion/challenger
 notebooks/      01 baselines · 02 GBDT · 03 LSTM · 04 ensemble/tuning/SHAP · 05 holdout + registration
 scripts/        backfill, build_clean, build_features, snapshot_forecast, fetch_model, forecast_day, db_migrate
 infra/          bootstrap.yaml (OIDC, roles, ECR) · api.yaml (Lambda + Function URL)
