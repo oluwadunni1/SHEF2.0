@@ -2,7 +2,8 @@
 #   1. snapshot the Open-Meteo forecast (gfs_seamless served + best_match) -> DVC/R2
 #   2. forecast tomorrow from THAT snapshot through the deployed API -> Supabase
 #   3. send realised load so yesterday's rows get actual_load_mw
-#   4. monitoring: served-weather error vs ERA5 / training proxy, input drift
+#   4. monitoring: served-weather error vs ERA5 / training proxy, input drift,
+#      ERCOT's own forecast for tomorrow (benchmark, quota permitting)
 #   5. publish the dashboard to GitHub Pages
 #
 # GitHub cron is UTC-only and best-effort (a whole day was dropped on
@@ -137,6 +138,7 @@ jobs:
         continue-on-error: true   # best effort: never fails the forecast
         env:
           MONITOR_DATABASE_URL: ${{ secrets.MONITOR_DATABASE_URL }}
+          GRIDSTATUS_API_KEY: ${{ secrets.GRIDSTATUS_API_KEY }}
         run: uv run python scripts/monitor.py
 
       - name: "Dry run: signed /health only"

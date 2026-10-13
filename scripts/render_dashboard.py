@@ -54,6 +54,9 @@ def gather(conn) -> dict:
         "drift": rows(conn, """SELECT * FROM monitoring.drift
                                WHERE computed_on = (SELECT max(computed_on) FROM monitoring.drift) ORDER BY feature"""),
         "promotions": rows(conn, "SELECT * FROM monitoring.promotions ORDER BY evaluated_at DESC LIMIT 12"),
+        "benchmark": rows(conn, "SELECT * FROM monitoring.v_benchmark_summary ORDER BY kind"),
+        "benchmark_daily": rows(conn, "SELECT * FROM monitoring.v_benchmark_daily ORDER BY target_day"),
+        "usage": (rows(conn, "SELECT * FROM monitoring.api_usage ORDER BY checked_at DESC LIMIT 1") or [None])[0],
         "model": live[-1] if live else None,
         "run_url": (f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
                     if os.environ.get("GITHUB_RUN_ID") else None),

@@ -185,9 +185,56 @@ Scores cover hours that have an archived forecast; Uri is excluded.
   The verdict is **keep**. A month of extra data is worth about nothing, and the margin stops churn.
 - v1 now carries the `@champion` alias, and `deploy_api` deploys whatever the alias points to.
 
-## 8. Still open
+## 8. P7 hour-ahead: no-go (2026-10-13)
 
-- [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample)
-- [ ] Hour-ahead go / no-go: a ~25 min delay makes it technically possible, but one sample is not enough. Parked as optional P7.
+**Decision: not built.** Measured, not assumed:
+- GridStatus's Free plan allows **250 API requests a month** (`get_api_usage()`: 500k rows; 30 per minute).
+- Hourly hour-ahead serving needs about 720 requests a month.
+- The latency probe that should have gated it needs about 8,600 at 5-minute resolution.
+- Day-ahead uses about 35 (one load fetch per daily run plus the monthly refresh), so it stays well inside the quota.
+
+**What would reopen it:** a source without that cap. ERCOT's own public API (apiexplorer.ercot.com, free with registration) publishes the same weather-zone load. Even then, the latency p99 has to come first. A model that relies on the last hour's load is only as good as how reliably that hour is published.
+
+**What was built instead:** the ERCOT benchmark (section 9). The quota is now watched as well:
+- `monitoring.api_usage` is logged daily and shown on the dashboard;
+- optional calls are skipped once fewer than 60 requests remain.
+
+## 9. Benchmark against ERCOT's own forecast (2026-10-13)
+
+**The comparison:**
+- ERCOT's South Central day-ahead forecast, taken point in time: per target hour, the latest publish at or before our 10:00 CT issue time. That was the 09:30 CT publish for all 2,880 hours.
+- Stored in `monitoring.ercot_forecast`, compared in `monitoring.v_benchmark*`.
+- It uses one GridStatus request per day, so the quota decided the scope: 120 days now (Jun 12 → Oct 9 2026, the summer peak season). The rest of the holdout follows after the 1 Nov reset (`scripts/ercot_benchmark.py` resumes).
+- Tomorrow's ERCOT forecast is also stored each day, so the comparison continues live.
+
+| Jun 12 → Oct 9 2026, matched hours | MAPE | Peak-MAPE | RMSE | Bias |
+|---|---|---|---|---|
+| ERCOT | **2.79%** | **2.52%** | **437 MW** | −0.79% |
+| Ours (holdout backtest) | 3.65% | 3.38% overall holdout; 3.89% on these hours | 551 MW | −1.97% |
+
+**ERCOT is better overall.** Ours is better on 39% of hours, and better in July (2.85% vs 3.06%).
+
+**The gap is one specific failure, not general weakness:**
+
+| | Jun | Jul | Aug | Sep | Oct |
+|---|---|---|---|---|---|
+| Our bias | −0.9% | −1.1% | −1.7% | **−4.3%** | +0.9% |
+| ERCOT's bias | −0.8% | −1.2% | −0.2% | −1.3% | +0.6% |
+
+- Our under-forecasting grows as South Central sets demand records (16.1 GW on Aug 27).
+- On the top 5% of load hours, our bias is −3.8% against ERCOT's −1.6%.
+- Trees can't extrapolate beyond the levels they've seen, and the linear trend rises more slowly than 2026 demand did. ERCOT also has more weather inputs and real-time telemetry, and adapts within days.
+- The same issue appeared in the RMSE analysis (early-September under-forecasts) and in the drift monitor (load above past Octobers).
+
+**Next model work, in order of evidence:**
+1. Make the model follow the current demand level: weight recent data more, or use the ratio-to-level target from P3 E2, evaluated on summer 2026.
+2. Use ERCOT's 09:30 forecast as a feature. It's legal at 10:00, but the quota limits training history: about 3,650 requests for 10 years.
+3. Prediction intervals.
+
+None of this was tuned on the holdout. Any challenger goes through the monthly promotion rule.
+
+## 10. Still open
+
+- [ ] GridStatus publish latency p99 over several days (provisional 1 h from one sample). Only needed if hour-ahead is reopened (section 8).
 - [x] Confirm Open-Meteo `previous_day1` lead definition: predicted 24 h before valid time
 - [x] Weather model: `gfs_seamless` (identical to `best_match` in the archive; pinned for live parity)

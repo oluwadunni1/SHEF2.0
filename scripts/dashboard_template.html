@@ -102,6 +102,19 @@ footer a { color: var(--ink-2); }
 
   <section class="grid two">
     <div class="card">
+      <h2>Against ERCOT's own forecast</h2>
+      <div class="sub">ERCOT's South Central forecast as published by 09:30 CT on D-1, the same information cut-off as ours. Matched hours only.</div>
+      <div id="bench"></div>
+    </div>
+    <div class="card">
+      <h2>Benchmark summary</h2>
+      <div class="sub">Same hours, same actuals. "Ours better" is the share of hours where our error was smaller.</div>
+      <div id="bench-table"></div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
       <h2>Weather forecast the model was served</h2>
       <div class="sub">Temperature, population-weighted over 4 cities, on each target day. <b>vs ERA5</b>: against what was observed.
         <b>vs training proxy</b>: against the archived forecast the model was trained and backtested on.</div>
@@ -219,6 +232,10 @@ function render() {
   tile("Live bias, 30 days", live30 ? (live30.bias_pct > 0 ? "+" : "") + pct(live30.bias_pct) : "—", `negative = under-forecast · backtest ${back ? (back.bias_pct > 0 ? "+" : "") + pct(back.bias_pct) : "—"}`);
   tile("Live RMSE, 30 days", live30 ? fmt(live30.rmse, 0) + " MW" : "—", `backtest ${back ? fmt(back.rmse, 0) + " MW" : "—"}`);
   tile("Days live", String(D.live_days), `${D.fallback_hours} fallback hour(s) served`);
+  const bb = D.benchmark.find(r => r.kind === "backtest");
+  if (bb) tile("vs ERCOT, backtest", `${pct(bb.ours_mape)} vs ${pct(bb.ercot_mape)}`, `MAPE, ours vs ERCOT · ${bb.n_days} matched days`);
+  if (D.usage) tile("GridStatus quota", `${D.usage.requests_used} / ${D.usage.requests_limit}`,
+    `requests this month · ${fmt(D.usage.rows_used / 1000, 0)}k / ${fmt(D.usage.rows_limit / 1000, 0)}k rows`);
 
   // Latest forecast.
   const L = document.getElementById("latest");
@@ -255,6 +272,19 @@ function render() {
   const LE = document.getElementById("lead");
   lineChart(LE, leads.map(String), [{ name: "Backtest", color: "--s1", data: lead("backtest") }, { name: "Live", color: "--s2", data: lead("live") }], { yTitle: "MAPE %", yFmt: v => fmt(v, 1) });
   tableView(LE, ["Lead h", "Kind", "MAPE %", "Hours"], D.by_lead.map(r => [r.lead_hours, r.kind, fmt(r.mape, 2), r.n_hours]));
+
+  // Benchmark.
+  const B = document.getElementById("bench"), BT = document.getElementById("bench-table");
+  if (D.benchmark_daily.length) {
+    const bd = D.benchmark_daily;
+    lineChart(B, bd.map(r => r.target_day), [{ name: "Ours", color: "--s1", data: bd.map(r => r.ours_mape) },
+      { name: "ERCOT", color: "--s2", data: bd.map(r => r.ercot_mape) }], { yTitle: "Daily MAPE %", yFmt: v => fmt(v, 1) });
+    tableView(B, ["Day", "Kind", "Ours MAPE %", "ERCOT MAPE %", "Hours"], bd.slice().reverse().map(r =>
+      [r.target_day, r.kind, fmt(r.ours_mape, 2), fmt(r.ercot_mape, 2), r.n_hours]));
+    table(BT, ["", "Days", "MAPE", "Peak-MAPE", "RMSE MW", "Bias", "Ours better"], D.benchmark.flatMap(r => [
+      [`${r.kind}: ours`, r.n_days, pct(r.ours_mape), pct(r.ours_peak_mape), fmt(r.ours_rmse, 0), pct(r.ours_bias_pct), pct(r.ours_wins_pct, 0)],
+      [`${r.kind}: ERCOT`, r.n_days, pct(r.ercot_mape), pct(r.ercot_peak_mape), fmt(r.ercot_rmse, 0), pct(r.ercot_bias_pct), ""]]));
+  } else { empty(B, "ERCOT's forecasts are being loaded."); empty(BT, "—"); }
 
   // Weather.
   const W = document.getElementById("weather");

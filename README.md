@@ -7,6 +7,12 @@ Every day at **10:00 Central**, forecast each hour of tomorrow's electricity loa
 | Baseline: freshest legal same-hour load | 7.62% | 3.79% | 1,013 MW |
 | **LightGBM + trend target** | **3.79%** | **3.38%** | **482 MW** |
 
+**Against ERCOT's own published forecast** (the 09:30 CT publish, the same information cut-off), on 120 matched summer days of 2026:
+- ERCOT is better overall: **2.79% vs 3.65%** MAPE.
+- The gap is systematic under-forecasting while demand set records (our September bias −4.3%).
+- In July we beat ERCOT (2.85% vs 3.06%).
+- Details: [FINDINGS section 9](audit/FINDINGS.md).
+
 Holdout: Aug 2025 → Oct 2026. It was scored once, on archived weather *forecasts* (not observed weather), after model selection on three yearly CV folds (CV: 4.18% / 2.99%).
 
 ## Why v2 exists

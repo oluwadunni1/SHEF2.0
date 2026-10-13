@@ -1,7 +1,8 @@
 """
 monitor.py — daily monitoring after the forecast: weather-forecast error of
-what was served, and input drift. Writes to the monitoring schema with the
-monitor_writer login (MONITOR_DATABASE_URL), which cannot touch predictions.
+what was served, input drift, ERCOT's own forecast for tomorrow (benchmark;
+only while the GridStatus quota has room), and the quota itself. Writes to
+the monitoring schema with the monitor_writer login (MONITOR_DATABASE_URL), which cannot touch predictions.
 
     uv run --env-file .env python scripts/monitor.py [--dry-run]
 
@@ -12,13 +13,16 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import timedelta
 
 import pandas as pd
 import psycopg
 
 from shef import store
 from shef.config import CENTRAL_TZ, REPORTS
-from shef.monitoring import drift, weather
+from shef.monitoring import benchmark, drift, weather
+from shef.sources import gridstatus
+from shef.timestamps import issue_time_utc
 
 UPSERT_WEATHER = """
 INSERT INTO monitoring.weather_checks (issue_date, comparison, variable, n_hours, mae, bias, p95_abs)
@@ -71,6 +75,22 @@ def main() -> None:
         for r in results:
             print(f"  drift {r['feature']:<26} PSI {r['psi']:.3f}  {r['status']}")
 
+        gs = gridstatus.client()
+        usage = gridstatus.usage(gs)
+        tomorrow = today + timedelta(days=1)
+        issue = issue_time_utc(tomorrow)
+        ercot = pd.DataFrame()
+        if pd.Timestamp.now(tz="UTC") < issue:
+            print(f"ercot: issue time {issue} not reached; skipped")
+        elif benchmark.can_spend(usage):
+            ercot = gridstatus.fetch_ercot_forecast(tomorrow, issue, gs)
+            usage = gridstatus.usage(gs)
+            print(f"ercot: {len(ercot)} hours of ERCOT's forecast for {tomorrow} (published by {issue})")
+        else:
+            print(f"ercot: skipped to protect the quota ({usage['requests_used']}/{usage['requests_limit']} used)")
+        print(f"gridstatus quota: {usage['requests_used']}/{usage['requests_limit']} requests, "
+              f"{usage['rows_used']:,}/{usage['rows_limit']:,} rows this period")
+
         if args.dry_run:
             print("dry run: nothing written")
             return
@@ -79,6 +99,8 @@ def main() -> None:
                 conn.execute(UPSERT_WEATHER, c)
             for r in results:
                 conn.execute(UPSERT_DRIFT, {**r, "computed_on": today})
+            benchmark.store(conn, ercot, issue)
+            benchmark.record_usage(conn, usage)
 
 
 if __name__ == "__main__":
