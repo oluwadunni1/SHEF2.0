@@ -24,3 +24,4 @@ data/reports/validation_clean_*.json
 
 # CatBoost scratch logs
 catboost_info/
+site/

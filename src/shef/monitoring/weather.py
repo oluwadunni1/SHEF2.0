@@ -33,9 +33,15 @@ from shef.weather_weights import weight_cities
 ERA5_LAG_DAYS = 7
 
 
+def is_served(snapshot: pd.DataFrame) -> pd.Series:
+    """Rows of the served model. Snapshots from before the model column existed were best_match."""
+    model = snapshot["model"] if "model" in snapshot else pd.Series("best_match", index=snapshot.index)
+    return model == SERVED_WEATHER_MODEL
+
+
 def served_series(snapshot: pd.DataFrame, issue_date: date) -> pd.Series:
     """Weighted served temperature on the target day of one issue date, indexed by ts_utc."""
-    snap = snapshot[(snapshot["issue_date_central"] == str(issue_date)) & (snapshot.get("model") == SERVED_WEATHER_MODEL)]
+    snap = snapshot[(snapshot["issue_date_central"] == str(issue_date)) & is_served(snapshot)]
     if snap.empty:
         return pd.Series(dtype=float)
     w = weight_cities(align_weather(snap, "forecast"), ["temp_c"]).set_index("ts_utc")["temp_c"]
@@ -67,7 +73,7 @@ def compare(served: pd.Series, ref: pd.Series) -> dict | None:
 
 def due_issue_dates(snapshot: pd.DataFrame, done: set[tuple[date, str]], today: date) -> list[date]:
     """Issue dates with a served snapshot, whose target day is ERA5-final, not yet scored for both comparisons."""
-    has = snapshot.get("model") == SERVED_WEATHER_MODEL
+    has = is_served(snapshot)
     dates = sorted({date.fromisoformat(d) for d in snapshot.loc[has, "issue_date_central"].unique()})
     need = {"served_vs_era5", "served_vs_previous_day1"}
     return [d for d in dates

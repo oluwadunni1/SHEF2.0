@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SHEF 2.0 Monitor</title>
+<meta name="description" content="Live monitoring of a day-ahead hourly electricity load forecast for ERCOT South Central.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --good-text: #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --good-text: #0ca30c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --good-text: #0ca30c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; }
+header h1 { font-size: 24px; margin: 0 0 4px; font-weight: 650; }
+header p { margin: 0; color: var(--ink-2); max-width: 760px; }
+.meta { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.meta a { color: var(--ink-2); }
+.grid { display: grid; gap: 16px; margin-top: 24px; }
+.tiles { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); }
+.card { background: var(--surface); border-radius: 12px; box-shadow: 0 0 0 1px var(--ring); padding: 16px 18px; min-width: 0; }
+.card h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.card .sub { font-size: 13px; color: var(--ink-2); margin: 2px 0 12px; }
+.tile .label { font-size: 13px; color: var(--ink-2); }
+.tile .value { font-size: 28px; font-weight: 600; margin-top: 2px; }
+.tile .note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.hero .value { font-size: 48px; line-height: 1.1; }
+.chart { position: relative; height: 260px; }
+.legend { display: flex; gap: 16px; font-size: 13px; color: var(--ink-2); margin-bottom: 8px; flex-wrap: wrap; }
+.key { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 6px; border-radius: 1px; }
+.empty { height: 260px; display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 14px; padding: 0 24px; }
+details { margin-top: 8px; font-size: 13px; color: var(--ink-2); }
+summary { cursor: pointer; }
+.tablewrap { overflow-x: auto; max-height: 280px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink-2); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
+.status { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
+footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SHEF 2.0 · day-ahead load forecast monitor</h1>
+    <p>Every day at 10:00 Central, tomorrow's hourly electricity load for ERCOT's South Central weather zone
+      (Austin, San Antonio) is forecast using only data available at that moment, and checked against what actually happened.
+      Rows marked <b>backtest</b> are the Aug 2025 – Oct 2026 holdout, scored once on archived weather forecasts; <b>live</b> rows are real forecasts.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="grid tiles" id="tiles"></section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2 id="latest-title">Latest forecast</h2>
+      <div class="sub" id="latest-sub"></div>
+      <div id="latest"></div>
+    </div>
+    <div class="card">
+      <h2>Forecast vs actual, last 14 days</h2>
+      <div class="sub">Live, hourly. Fallback hours (baseline served because the weather forecast was incomplete) are listed in the table.</div>
+      <div id="recent"></div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Daily MAPE: backtest, then live</h2>
+      <div class="sub">Mean absolute percentage error per Central day.</div>
+      <div id="daily"></div>
+    </div>
+    <div class="card">
+      <h2>Error by lead time</h2>
+      <div class="sub">Hours from the 10:00 issue to the target hour (14 = midnight, 37 = 23:00).</div>
+      <div id="lead"></div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Weather forecast the model was served</h2>
+      <div class="sub">Temperature, population-weighted over 4 cities, on each target day. <b>vs ERA5</b>: against what was observed.
+        <b>vs training proxy</b>: against the archived forecast the model was trained and backtested on.</div>
+      <div id="weather"></div>
+    </div>
+    <div class="card">
+      <h2>Input drift</h2>
+      <div class="sub">PSI of the last 14 live days against the same month in the 3 training years before the model's cut-off.
+        Thresholds are calibrated on 1,000+ historical windows: watch above their 95th percentile, drift above their 99th.</div>
+      <div id="drift"></div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Model</h2>
+      <div class="sub">What is serving, and how it got there.</div>
+      <div id="model"></div>
+    </div>
+    <div class="card">
+      <h2>Promotion log</h2>
+      <div class="sub">Monthly: a retrained challenger replaces the champion only if it beats it by ≥ 0.10 MAPE points on days neither model trained on, without a worse Peak-MAPE.</div>
+      <div id="promotions"></div>
+    </div>
+  </section>
+
+  <footer>Built by the daily GitHub Actions job from a read-only database role. Source:
+    <a href="https://github.com/oluwadunni1/SHEF2.0">github.com/oluwadunni1/SHEF2.0</a></footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const DATA = /*__DATA__*/null;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const el = (tag, attrs = {}, text) => { const e = document.createElement(tag); Object.assign(e, attrs); if (text != null) e.textContent = text; return e; };
+const fmt = (v, d = 1) => v == null ? "—" : Number(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v, d = 2) => v == null ? "—" : fmt(v, d) + "%";
+const ct = iso => new Date(iso).toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", hour12: false });
+const hourCT = iso => new Date(iso).toLocaleString("en-US", { timeZone: "America/Chicago", hour: "2-digit", minute: "2-digit", hour12: false });
+
+function table(container, headers, rows) {
+  const wrap = el("div", { className: "tablewrap" }), t = el("table"), tr = el("tr");
+  headers.forEach(h => tr.appendChild(el("th", {}, h)));
+  t.appendChild(el("thead")).appendChild(tr);
+  const tb = t.appendChild(el("tbody"));
+  rows.forEach(r => { const row = tb.appendChild(el("tr")); r.forEach(c => { const td = row.appendChild(el("td")); c instanceof Node ? td.appendChild(c) : td.textContent = c; }); });
+  wrap.appendChild(t); container.appendChild(wrap);
+}
+function tableView(container, headers, rows) {
+  const d = el("details"); d.appendChild(el("summary", {}, "Table view"));
+  table(d, headers, rows); container.appendChild(d);
+}
+function empty(container, msg) { container.appendChild(el("div", { className: "empty" }, msg)); }
+function legend(container, items) {
+  const l = el("div", { className: "legend" });
+  items.forEach(([name, color]) => { const s = el("span"); const k = el("span", { className: "key" }); k.style.background = color; s.append(k, name); l.appendChild(s); });
+  container.appendChild(l);
+}
+function statusCell(status) {
+  const map = { ok: ["var(--good)", "OK"], watch: ["var(--warning)", "Watch"], drift: ["var(--critical)", "Drift"] };
+  const [c, label] = map[status] || ["var(--muted)", status];
+  const s = el("span", { className: "status" }); const d = el("span", { className: "dot" }); d.style.background = c;
+  s.append(d, label); return s;
+}
+
+const charts = [];
+const crosshair = { id: "crosshair", afterDatasetsDraw(c) {
+  const a = c.tooltip && c.tooltip.getActiveElements();
+  if (!a || !a.length) return;
+  const x = a[0].element.x, { top, bottom } = c.chartArea, g = c.ctx;
+  g.save(); g.strokeStyle = css("--axis"); g.lineWidth = 1; g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke(); g.restore();
+}};
+function lineChart(container, labels, series, { yTitle, yFmt = v => fmt(v, 0), area = false } = {}) {
+  if (series.length > 1) legend(container, series.map(s => [s.name, css(s.color)]));
+  const box = el("div", { className: "chart" }), cv = el("canvas");
+  cv.setAttribute("role", "img"); cv.setAttribute("aria-label", series.map(s => s.name).join(" and ") + " chart; see table view");
+  box.appendChild(cv); container.appendChild(box);
+  const make = () => new Chart(cv, {
+    type: "line",
+    data: { labels, datasets: series.map(s => ({
+      label: s.name, data: s.data, borderColor: css(s.color), borderWidth: 2, pointRadius: 0, pointHoverRadius: 5,
+      pointHoverBorderColor: css("--surface"), pointHoverBorderWidth: 2, pointHoverBackgroundColor: css(s.color),
+      tension: 0.2, spanGaps: false, fill: area ? "origin" : false,
+      backgroundColor: css(s.color) + "1a", borderCapStyle: "round", borderJoinStyle: "round" })) },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { backgroundColor: css("--surface"), titleColor: css("--ink-2"), bodyColor: css("--ink"),
+          borderColor: css("--ring"), borderWidth: 1, padding: 10, boxWidth: 12, boxHeight: 2, usePointStyle: false,
+          callbacks: { label: ctx => ` ${yFmt(ctx.parsed.y)}  ${ctx.dataset.label}` } } },
+      scales: {
+        x: { grid: { display: false }, border: { color: css("--axis") }, ticks: { color: css("--muted"), maxTicksLimit: 7, maxRotation: 0 } },
+        y: { grid: { color: css("--grid") }, border: { display: false }, ticks: { color: css("--muted"), callback: v => yFmt(v), maxTicksLimit: 6 },
+             title: { display: !!yTitle, text: yTitle, color: css("--muted") }, beginAtZero: false } } },
+    plugins: [crosshair] });
+  charts.push({ make, chart: make() });
+}
+
+function render() {
+  const D = DATA;
+  const meta = document.getElementById("meta");
+  meta.append(`Updated ${new Date(D.generated_at).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central`);
+  if (D.run_url) { meta.append(" · "); meta.appendChild(el("a", { href: D.run_url }, "last run")); }
+
+  // Tiles: live 30-day next to the backtest (definition of done).
+  const back = D.summary.find(r => r.kind === "backtest" && r.model_version === "served");
+  const live30 = D.window_30d.find(r => r.kind === "live");
+  const tiles = document.getElementById("tiles");
+  const tile = (label, value, note, hero) => { const t = el("div", { className: "card tile" + (hero ? " hero" : "") });
+    t.append(el("div", { className: "label" }, label), el("div", { className: "value" }, value), el("div", { className: "note" }, note)); tiles.appendChild(t); };
+  tile("Live MAPE, last 30 days", live30 ? pct(live30.mape) : "—",
+       live30 ? `${live30.n_days} day(s) scored · backtest ${pct(back && back.mape)}` : `No scored live days yet · backtest ${pct(back && back.mape)}`, true);
+  tile("Live Peak-MAPE, 30 days", live30 ? pct(live30.peak_mape) : "—", `top 5% load hours · backtest ${pct(back && back.peak_mape)}`);
+  tile("Live bias, 30 days", live30 ? (live30.bias_pct > 0 ? "+" : "") + pct(live30.bias_pct) : "—", `negative = under-forecast · backtest ${back ? (back.bias_pct > 0 ? "+" : "") + pct(back.bias_pct) : "—"}`);
+  tile("Live RMSE, 30 days", live30 ? fmt(live30.rmse, 0) + " MW" : "—", `backtest ${back ? fmt(back.rmse, 0) + " MW" : "—"}`);
+  tile("Days live", String(D.live_days), `${D.fallback_hours} fallback hour(s) served`);
+
+  // Latest forecast.
+  const L = document.getElementById("latest");
+  if (D.latest.length) {
+    const day = D.latest[0].target_day;
+    document.getElementById("latest-title").textContent = `Forecast for ${new Date(day + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}`;
+    const peak = D.latest.reduce((a, b) => b.predicted_load_mw > a.predicted_load_mw ? b : a);
+    document.getElementById("latest-sub").textContent =
+      `Issued ${ct(D.latest[0].issue_time_utc)}:00 CT · peak ${fmt(peak.predicted_load_mw, 0)} MW at ${hourCT(peak.target_timestamp)} CT · ${D.latest[0].model_name} v${D.latest[0].model_version}`;
+    lineChart(L, D.latest.map(r => hourCT(r.target_timestamp)), [{ name: "Forecast, MW", color: "--s1", data: D.latest.map(r => r.predicted_load_mw) }], { yTitle: "MW", area: true });
+    tableView(L, ["Hour (CT)", "Lead h", "Forecast MW", "Served as"], D.latest.map(r => [hourCT(r.target_timestamp), r.lead_hours, fmt(r.predicted_load_mw, 0), r.served_as]));
+  } else { document.getElementById("latest-sub").textContent = ""; empty(L, "No live forecast yet. The first one is issued at 10:00 Central."); }
+
+  // Last 14 days.
+  const R = document.getElementById("recent");
+  if (D.recent.length) {
+    lineChart(R, D.recent.map(r => ct(r.target_timestamp)), [
+      { name: "Forecast", color: "--s1", data: D.recent.map(r => r.predicted_load_mw) },
+      { name: "Actual", color: "--s2", data: D.recent.map(r => r.actual_load_mw) }], { yTitle: "MW" });
+    tableView(R, ["Hour (CT)", "Forecast MW", "Actual MW", "Error %", "Served as"], D.recent.slice().reverse().map(r =>
+      [ct(r.target_timestamp), fmt(r.predicted_load_mw, 0), fmt(r.actual_load_mw, 0), fmt((r.predicted_load_mw - r.actual_load_mw) / r.actual_load_mw * 100, 1), r.served_as]));
+  } else empty(R, "Actuals arrive the day after each forecast; the first live day scores once its load is published.");
+
+  // Daily MAPE: one timeline, backtest then live.
+  const days = [...new Set(D.daily.map(r => r.target_day))].sort();
+  const by = k => { const m = new Map(D.daily.filter(r => r.kind === k).map(r => [r.target_day, r.mape])); return days.map(d => m.has(d) ? m.get(d) : null); };
+  const DM = document.getElementById("daily");
+  lineChart(DM, days, [{ name: "Backtest", color: "--s1", data: by("backtest") }, { name: "Live", color: "--s2", data: by("live") }], { yTitle: "MAPE %", yFmt: v => fmt(v, 1) });
+  tableView(DM, ["Day", "Kind", "MAPE %", "Bias %", "Hours"], D.daily.slice().reverse().map(r => [r.target_day, r.kind, fmt(r.mape, 2), fmt(r.bias_pct, 2), r.n_hours]));
+
+  // By lead.
+  const leads = [...new Set(D.by_lead.map(r => r.lead_hours))].sort((a, b) => a - b);
+  const lead = k => { const m = new Map(D.by_lead.filter(r => r.kind === k).map(r => [r.lead_hours, r.mape])); return leads.map(h => m.has(h) ? m.get(h) : null); };
+  const LE = document.getElementById("lead");
+  lineChart(LE, leads.map(String), [{ name: "Backtest", color: "--s1", data: lead("backtest") }, { name: "Live", color: "--s2", data: lead("live") }], { yTitle: "MAPE %", yFmt: v => fmt(v, 1) });
+  tableView(LE, ["Lead h", "Kind", "MAPE %", "Hours"], D.by_lead.map(r => [r.lead_hours, r.kind, fmt(r.mape, 2), r.n_hours]));
+
+  // Weather.
+  const W = document.getElementById("weather");
+  if (D.weather.length) table(W, ["Issue date", "Comparison", "MAE °C", "Bias °C", "p95 |err| °C", "Hours"],
+    D.weather.map(r => [r.issue_date, r.comparison === "served_vs_era5" ? "vs ERA5" : "vs training proxy", fmt(r.mae, 2), (r.bias > 0 ? "+" : "") + fmt(r.bias, 2), fmt(r.p95_abs, 2), r.n_hours]));
+  else empty(W, "Scored once ERA5 is final for the target day (about a week after each forecast). Backtest reference: day-1 MAE 1.32 °C.");
+
+  // Drift.
+  const DR = document.getElementById("drift");
+  if (D.drift.length) table(DR, ["Feature", "PSI", "Status", "Ref month", "Hours"], D.drift.map(r => [r.feature, fmt(r.psi, 2), statusCell(r.status), r.ref_months, r.n_current]));
+  else empty(DR, "Needs 7 days of live inputs.");
+
+  // Model card.
+  const M = document.getElementById("model");
+  const m = D.model;
+  table(M, ["", ""], [
+    ["Serving", m ? `${m.model_name} v${m.model_version}` : "shef2-day-ahead v1"],
+    ["Algorithm", "LightGBM on a trend-residual target, 42 point-in-time features"],
+    ["MLflow run", m && m.mlflow_run_id ? m.mlflow_run_id.slice(0, 12) : "—"],
+    ["Weather input", "Open-Meteo gfs_seamless, archived at issue time"],
+    ["Backtest (holdout)", back ? `MAPE ${pct(back.mape)} · Peak ${pct(back.peak_mape)} · RMSE ${fmt(back.rmse, 0)} MW · ${back.n_days} days` : "—"],
+    ["Baseline on holdout", "MAPE 7.62% · RMSE 1,013 MW (freshest legal same-hour load)"]]);
+
+  const P = document.getElementById("promotions");
+  if (D.promotions.length) table(P, ["Evaluated", "Window", "Champion MAPE", "Challenger MAPE", "Decision"],
+    D.promotions.map(r => [r.evaluated_at.slice(0, 10), r.window_start ? `${r.window_start} → ${r.window_end}` : "—",
+      pct(r.champion_mape), pct(r.challenger_mape), `${r.decision}: ${r.reason}`]));
+  else empty(P, "First evaluation on the 1st of the month; it needs 28 live days after the champion's training cut-off.");
+}
+
+render();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => charts.forEach(c => { c.chart.destroy(); c.chart = c.make(); }));
+</script>
+</body>
+</html>

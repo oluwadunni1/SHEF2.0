@@ -46,12 +46,14 @@ def archived_weather(issue: pd.Timestamp) -> pd.DataFrame:
 
     snap = store.read("raw", "weather_fc_live")
     day = str(issue.tz_convert(CENTRAL_TZ).date())
-    keep = (snap["issue_date_central"] == day) & (snap.get("model") == SERVED_WEATHER_MODEL)
+    from shef.monitoring.weather import is_served
+
+    keep = (snap["issue_date_central"] == day) & is_served(snap)
     rows = snap[keep]
     if rows.empty:
         raise SystemExit(f"no {SERVED_WEATHER_MODEL} snapshot for issue date {day}; run snapshot_forecast.py first")
     print(f"weather: {SERVED_WEATHER_MODEL} snapshot fetched {rows['run_fetched_at_utc'].iloc[0]}")
-    return rows.drop(columns=["issue_date_central", "run_fetched_at_utc", "model"])
+    return rows.drop(columns=["issue_date_central", "run_fetched_at_utc", "model"], errors="ignore")
 
 
 def show(out: dict) -> None:

@@ -2,6 +2,8 @@
 #   1. snapshot the Open-Meteo forecast (gfs_seamless served + best_match) -> DVC/R2
 #   2. forecast tomorrow from THAT snapshot through the deployed API -> Supabase
 #   3. send realised load so yesterday's rows get actual_load_mw
+#   4. monitoring: served-weather error vs ERA5 / training proxy, input drift
+#   5. publish the dashboard to GitHub Pages
 #
 # GitHub cron is UTC-only and best-effort (a whole day was dropped on
 # 2026-10-12), so there are three slots, at :07 to avoid top-of-hour load:
@@ -31,6 +33,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  pages: write
 
 concurrency:
   group: daily
@@ -39,6 +42,8 @@ concurrency:
 jobs:
   day-ahead:
     runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.slot.outputs.mode }}
     timeout-minutes: 30
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
@@ -83,8 +88,9 @@ jobs:
           today=$(TZ=America/Chicago date +%Y-%m-%d)
           have=$(uv run python -c "
           from shef import store
+          from shef.monitoring.weather import is_served
           s = store.read('raw', 'weather_fc_live')
-          print(int(((s['issue_date_central'] == '$today') & (s.get('model') == 'gfs_seamless')).any()))")
+          print(int(((s['issue_date_central'] == '$today') & is_served(s)).any()))")
           if [ "$have" = 1 ]; then
             echo "snapshot for $today already archived; keeping it"
           else
@@ -126,6 +132,13 @@ jobs:
           SHEF_API_URL: ${{ vars.SHEF_API_URL }}
         run: uv run python scripts/forecast_day.py --from-snapshot
 
+      - name: Monitoring (weather error, drift)
+        if: steps.slot.outputs.mode == 'issue' || steps.slot.outputs.mode == 'catchup'
+        continue-on-error: true   # best effort: never fails the forecast
+        env:
+          MONITOR_DATABASE_URL: ${{ secrets.MONITOR_DATABASE_URL }}
+        run: uv run python scripts/monitor.py
+
       - name: "Dry run: signed /health only"
         if: steps.slot.outputs.mode == 'dry'
         env:
@@ -136,3 +149,28 @@ jobs:
           from shef.serving import client
           h = client.get(os.environ['SHEF_API_URL'], '/health')
           print('API up:', h['model_name'], 'v' + h['model_version'])"
+
+  # The public dashboard (GitHub Pages), rebuilt after every run that did
+  # anything, including failed ones, so a failure is visible there too. It
+  # reads only the monitoring schema, as the read-only dashboard_reader role.
+  dashboard:
+    needs: day-ahead
+    if: always() && needs.day-ahead.outputs.mode != 'skip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Render
+        env:
+          DASHBOARD_DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
+        run: uv run --no-project --with "psycopg[binary]" python scripts/render_dashboard.py --out site
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5.0.1
+
