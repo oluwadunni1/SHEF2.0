@@ -126,7 +126,7 @@ jobs:
           SHEF_API_URL: ${{ vars.SHEF_API_URL }}
         run: uv run python scripts/forecast_day.py --from-snapshot
 
-      - name: Dry run: signed /health only
+      - name: "Dry run: signed /health only"
         if: steps.slot.outputs.mode == 'dry'
         env:
           SHEF_API_URL: ${{ vars.SHEF_API_URL }}
