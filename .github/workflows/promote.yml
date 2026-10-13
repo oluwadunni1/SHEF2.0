@@ -1,0 +1,106 @@
+# Monthly champion/challenger check (src/shef/monitoring/promote.py).
+#
+#   1. refresh data: backfill the last 45 days (load, ERA5, archived forecasts),
+#      then `dvc repro` (clean -> features, every Pandera gate applies)
+#   2. retrain the champion's recipe on newer data and score both on the latest
+#      28 labelled days neither has seen
+#   3. promote only if MAPE improves by >= 0.10 pts without a worse Peak-MAPE:
+#      register vN, move @champion, rebuild the drift reference, deploy
+#
+# R2 keys (stored as AWS_*) reach only the DVC steps, as in daily.yml.
+name: promote
+
+on:
+  schedule:
+    - cron: "23 6 1 * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Evaluate and log, change nothing
+        type: boolean
+        default: true
+      as_of:
+        description: Last day the window may use (YYYY-MM-DD; default today)
+        required: false
+      simulate_champion_end:
+        description: Rehearsal only - stand in a champion trained through this date (implies dry run)
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - run: uv sync --frozen
+
+      - name: Pull data from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: uv run dvc pull
+
+      - name: Backfill the last 45 days
+        env:
+          GRIDSTATUS_API_KEY: ${{ secrets.GRIDSTATUS_API_KEY }}
+        run: uv run python scripts/backfill.py --source all --start "$(date -u -d '45 days ago' +%F)"
+
+      - name: Rebuild clean data and features (dvc repro)
+        run: uv run dvc repro
+
+      - name: Version and push data
+        if: env.DRY_RUN != 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          uv run dvc add data/raw
+          uv run dvc push
+
+      - name: Champion vs challenger
+        id: promote
+        env:
+          MONITOR_DATABASE_URL: ${{ secrets.MONITOR_DATABASE_URL }}
+          AS_OF: ${{ inputs.as_of }}
+          SIM: ${{ inputs.simulate_champion_end }}
+        run: |
+          FLAGS=()
+          if [ "$DRY_RUN" = true ]; then FLAGS+=(--dry-run); fi
+          if [ -n "$AS_OF" ]; then FLAGS+=(--as-of "$AS_OF"); fi
+          if [ -n "$SIM" ]; then FLAGS+=(--simulate-champion-end "$SIM"); fi
+          uv run python scripts/promote.py "${FLAGS[@]}"
+
+      - name: Rebuild the drift reference for the new champion
+        if: steps.promote.outputs.promoted == 'true'
+        run: uv run python scripts/build_drift_reference.py --train-end "${{ steps.promote.outputs.trained_through }}"
+
+      - name: Commit data and reference
+        if: env.DRY_RUN != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw.dvc dvc.lock data/reports/drift_reference.json data/reports/features_*.json data/reports/validation_joined.json
+          if git diff --cached --quiet; then echo "Nothing to commit."; exit 0; fi
+          git commit -m "data: monthly refresh $(date -u +%F)${{ steps.promote.outputs.promoted == 'true' && format(' + promote v{0}', steps.promote.outputs.version) || '' }}"
+          git pull --rebase
+          git push
+
+      - name: Deploy the new champion
+        if: steps.promote.outputs.promoted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy_api.yml -f model_version="${{ steps.promote.outputs.version }}"

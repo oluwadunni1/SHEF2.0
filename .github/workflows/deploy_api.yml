@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
     inputs:
       model_version:
-        description: shef2-day-ahead registry version to serve
-        default: "1"
+        description: shef2-day-ahead version number, or "champion" for the @champion alias
+        default: "champion"
   push:
     branches: [main]
     paths:
@@ -31,7 +31,7 @@ permissions:
 
 env:
   AWS_REGION: eu-west-1          # same region as the Supabase database
-  MODEL_VERSION: ${{ inputs.model_version || '1' }}
+  MODEL_REF: ${{ inputs.model_version || 'champion' }}   # a version number or the @champion alias
 
 jobs:
   deploy:
@@ -45,13 +45,14 @@ jobs:
       - name: API tests
         run: uv run pytest -q tests/test_serving.py
 
-      - name: Fetch model v${{ env.MODEL_VERSION }} from the registry
+      - name: Fetch model (${{ env.MODEL_REF }}) from the registry
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
-          uv run python scripts/fetch_model.py --version "$MODEL_VERSION" --out build/model
+          uv run python scripts/fetch_model.py --version "$MODEL_REF" --out build/model
+          echo "MODEL_VERSION=$(python3 -c "import json; print(json.load(open('build/model/model_meta.json'))['model_version'])")" >> "$GITHUB_ENV"
           uv export --only-group serve --no-hashes --frozen --no-emit-project -o build/requirements-serve.txt
 
       - name: Build image

@@ -78,3 +78,23 @@ def test_sql_summary_matches_metrics_py():
     y, p = np.array(rows).T
     expected = score(y, p)
     np.testing.assert_allclose(view, [expected[k] for k in ("mape", "peak_mape", "rmse", "bias_pct")], rtol=1e-9)
+
+
+@pytest.mark.parametrize("champ,chall,expected", [
+    ({"mape": 4.00, "peak_mape": 3.0}, {"mape": 3.95, "peak_mape": 2.9}, "keep"),     # gain below the margin
+    ({"mape": 4.00, "peak_mape": 3.0}, {"mape": 3.85, "peak_mape": 3.1}, "keep"),     # better MAPE, worse peaks
+    ({"mape": 4.00, "peak_mape": 3.0}, {"mape": 3.85, "peak_mape": 3.0}, "promote"),
+])
+def test_promotion_rule(champ, chall, expected):
+    from shef.monitoring.promote import decide
+    assert decide(champ, chall)[0] == expected
+
+
+def test_window_must_postdate_the_champion():
+    from shef.monitoring import promote
+
+    days = pd.date_range("2026-08-01", "2026-10-31", freq="D")
+    proxy = pd.DataFrame({"ts_utc": days.tz_localize("UTC") + pd.Timedelta(hours=17), "y": 1.0})
+    tables = {"proxy": proxy, "obs": proxy}
+    ev, model = promote.evaluate(tables, champion=None, champion_train_end=date(2026, 10, 9), as_of=date(2026, 10, 31))
+    assert ev.decision == "insufficient" and model is None
