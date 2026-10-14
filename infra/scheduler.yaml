@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  SHEF 2.0 clock and watchdog. GitHub Actions cron is best-effort (it dropped
+  2026-10-12 and ran 2026-10-13 5.5-6.5 h late), so the trigger lives here:
+    10:05 America/Chicago  dispatch .github/workflows/daily.yml (workflow_dispatch starts at once)
+    13:00 America/Chicago  ask the API whether tomorrow's forecast was logged; if not,
+                           email an alert and dispatch a catch-up run
+  EventBridge Scheduler retries delivery; the Lambda's async retries end in the
+  same SNS topic, so a failed trigger is never silent. Run once in CloudShell
+  (needs IAM rights, like bootstrap.yaml); see the README for the commands.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: oluwadunni1/SHEF2.0
+  TokenParameterName:
+    Type: String
+    Default: /shef2/github-dispatch-token
+    Description: SSM SecureString holding a fine-grained GitHub token (this repo only, Actions read/write)
+  ApiUrl:
+    Type: String
+    Default: https://3b5x3lmjv5wvdx5iqfe2lxdqja0rsgkl.lambda-url.eu-west-1.on.aws/
+  AlertEmail:
+    Type: String
+    Description: Where "forecast missing" and "trigger failed" alerts go (confirm the SNS email once)
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: shef2-alerts
+      Subscription:
+        - {Protocol: email, Endpoint: !Ref AlertEmail}
+
+  TriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: shef2-scheduler-fn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: shef2-scheduler
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadToken
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TokenParameterName}
+              - Sid: DecryptToken
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: "*"
+                Condition:
+                  StringEquals: {kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"}
+              - Sid: AskTheApi
+                Effect: Allow
+                Action: lambda:InvokeFunctionUrl
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:shef2-api
+              - Sid: Alert
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+
+  TriggerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/shef2-scheduler
+      RetentionInDays: 30
+
+  TriggerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: TriggerLogs
+    Properties:
+      FunctionName: shef2-scheduler
+      Description: Dispatches the daily GitHub workflow and checks that tomorrow's forecast landed
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt TriggerRole.Arn
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          REPO: !Ref GitHubRepo
+          TOKEN_PARAM: !Ref TokenParameterName
+          API_URL: !Ref ApiUrl
+          TOPIC_ARN: !Ref AlertTopic
+      Code:
+        ZipFile: |
+          """shef2-scheduler: {"action": "dispatch"} starts daily.yml; {"action": "check"} verifies
+          tomorrow's forecast is logged, and if not, alerts and dispatches a catch-up run.
+          Any exception fails the invocation, so Lambda retries it and then alerts via SNS."""
+          import json
+          import os
+          import urllib.request
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+
+          CENTRAL = ZoneInfo("America/Chicago")
+
+
+          def _token():
+              import boto3
+              p = boto3.client("ssm").get_parameter(Name=os.environ["TOKEN_PARAM"], WithDecryption=True)
+              return p["Parameter"]["Value"]
+
+
+          def _signed_headers(url):
+              import boto3
+              from botocore.auth import SigV4Auth
+              from botocore.awsrequest import AWSRequest
+              req = AWSRequest(method="GET", url=url)
+              creds = boto3.Session().get_credentials().get_frozen_credentials()
+              SigV4Auth(creds, "lambda", os.environ["AWS_REGION"]).add_auth(req)
+              return dict(req.headers)
+
+
+          def _alert(subject, message):
+              import boto3
+              boto3.client("sns").publish(TopicArn=os.environ["TOPIC_ARN"], Subject=subject[:99], Message=message)
+
+
+          def dispatch(why):
+              url = f"https://api.github.com/repos/{os.environ['REPO']}/actions/workflows/daily.yml/dispatches"
+              body = {"ref": "main", "inputs": {"dry_run": "false", "source": "eventbridge"}}
+              req = urllib.request.Request(url, method="POST", data=json.dumps(body).encode(), headers={
+                  "Authorization": f"Bearer {_token()}", "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "shef2-scheduler"})
+              with urllib.request.urlopen(req, timeout=20) as r:   # 4xx/5xx raise: the invocation fails
+                  if r.status != 204:
+                      raise RuntimeError(f"GitHub dispatch returned HTTP {r.status}")
+              print(f"dispatched daily.yml ({why})")
+
+
+          def logged(day):
+              url = os.environ["API_URL"].rstrip("/") + f"/logged?target_day={day}"
+              req = urllib.request.Request(url, headers=_signed_headers(url))
+              with urllib.request.urlopen(req, timeout=50) as r:   # allows for the API's cold start
+                  return json.loads(r.read())
+
+
+          def handler(event, context):
+              action = (event or {}).get("action")
+              now = datetime.now(CENTRAL)
+              if action == "dispatch":
+                  dispatch(f"issue run, {now:%Y-%m-%d %H:%M %Z}")
+                  return {"dispatched": True}
+              if action == "check":
+                  day = (now + timedelta(days=1)).date().isoformat()
+                  status = logged(day)
+                  print(json.dumps(status))
+                  if not status["complete"]:
+                      dispatch(f"catch-up: {day} had {status['hours_logged']}/{status['hours_expected']} hours at {now:%H:%M %Z}")
+                      _alert(f"SHEF2: forecast for {day} missing at {now:%H:%M %Z}",
+                             f"Only {status['hours_logged']} of {status['hours_expected']} hours of the {day} forecast "
+                             f"were logged by {now:%Y-%m-%d %H:%M %Z}. A catch-up run of daily.yml was dispatched; "
+                             f"check https://github.com/{os.environ['REPO']}/actions/workflows/daily.yml")
+                  return status
+              raise ValueError(f"unknown action {action!r}")
+
+  TriggerRetries:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref TriggerFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 2
+      MaximumEventAgeInSeconds: 3600
+      DestinationConfig:
+        OnFailure: {Destination: !Ref AlertTopic}
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: shef2-scheduler-invoke
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: scheduler.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref AWS::AccountId}
+      Policies:
+        - PolicyName: invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt TriggerFunction.Arn}
+
+  IssueSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: shef2-daily-issue
+      Description: 10:05 Central, every day, DST handled by the time zone
+      ScheduleExpression: cron(5 10 * * ? *)
+      ScheduleExpressionTimezone: America/Chicago
+      FlexibleTimeWindow: {Mode: "OFF"}
+      Target:
+        Arn: !GetAtt TriggerFunction.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"action": "dispatch"}'
+        RetryPolicy: {MaximumRetryAttempts: 5, MaximumEventAgeInSeconds: 3600}
+
+  CheckSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: shef2-daily-check
+      Description: 13:00 Central, is tomorrow's forecast logged? If not, alert and catch up
+      ScheduleExpression: cron(0 13 * * ? *)
+      ScheduleExpressionTimezone: America/Chicago
+      FlexibleTimeWindow: {Mode: "OFF"}
+      Target:
+        Arn: !GetAtt TriggerFunction.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"action": "check"}'
+        RetryPolicy: {MaximumRetryAttempts: 5, MaximumEventAgeInSeconds: 3600}
+
+Outputs:
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+  TriggerFunction:
+    Value: !Ref TriggerFunction

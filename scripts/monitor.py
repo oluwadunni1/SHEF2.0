@@ -89,6 +89,8 @@ def main() -> None:
         ercot = pd.DataFrame()
         if pd.Timestamp.now(tz="UTC") < issue:
             print(f"ercot: issue time {issue} not reached; skipped")
+        elif tomorrow in benchmark.have_days(conn):
+            print(f"ercot: forecast for {tomorrow} already stored; skipped")
         elif benchmark.can_spend(usage):
             ercot = gridstatus.fetch_ercot_forecast(tomorrow, issue, gs)
             usage = gridstatus.usage(gs)

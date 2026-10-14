@@ -67,7 +67,12 @@ flowchart LR
   SB --> MS
 ```
 
-Everything runs on schedules in GitHub Actions: `daily` (10:00 Central), `promote` (monthly), `deploy-api` (on serving changes or a promotion), `tests` (every push).
+The jobs run in GitHub Actions: `daily` (10:00 Central), `promote` (monthly), `deploy-api` (on serving changes or a promotion), `tests` (every push). The **clock is AWS EventBridge Scheduler** (`infra/scheduler.yaml`), not GitHub cron:
+- At 10:05 America/Chicago it dispatches `daily`, with retries.
+- At 13:00 it asks the API whether tomorrow's forecast was logged. If not, it emails an alert and dispatches a catch-up.
+- GitHub cron stays as a backup.
+
+GitHub cron is best-effort: it dropped 2026-10-12 and ran 2026-10-13's three slots 5.5 to 6.5 hours late.
 
 ## Design decisions worth reading
 
@@ -121,7 +126,9 @@ Everything runs on schedules in GitHub Actions: `daily` (10:00 Central), `promot
 
 - **Operations.**
   - **Publishing latency** is measured for free. Every daily load fetch records the newest hour GridStatus returned, which brackets how late the next hour is. This tests the 1-hour cutoff the features assume, instead of trusting one P0 sample.
-  - **Failures open a GitHub issue** (`ops-alert`): a failed or fallback forecast, a failed dashboard build, or a monitoring step that failed quietly under `continue-on-error`. One issue per day; later slots comment on it.
+  - **Failures open a GitHub issue** (`ops-alert`): a failed or fallback forecast, a failed dashboard build, or a monitoring step that failed quietly under `continue-on-error`. One issue per day; later runs comment on it.
+  - **A missing forecast is caught by checking the output, not the job.** On 2026-10-13 every run was green and nothing was forecast: the runs were late and correctly skipped. The 13:00 check asks the API itself (`GET /logged`) whether tomorrow's 23–25 hours exist.
+  - **Late runs still forecast.** Any run from 10:00 Central to midnight forecasts, with load still cut at 10:00. A run that finds tomorrow already logged exits before spending any GridStatus requests.
 
 ## Model card
 
@@ -143,7 +150,7 @@ Stated plainly, because an interviewer will find them anyway:
 1. **ERCOT's operational forecast is better** by 0.86 MAPE points on the 120 days compared (we win 39% of hours; July is ours). The gap is level adaptation: during record demand we under-forecast. Next: a recency-weighted or ratio-target challenger, put through the existing promotion gate with ERCOT as a second bar.
 2. **Point forecasts only.** No intervals, so no "how sure?" answer. Next: quantile LightGBM or conformal intervals, checked for coverage on the holdout.
 3. **Short live record.** The system went live on 2026-10-13. Backtest numbers are honest (archived forecasts, scored once), but they are not a track record; the dashboard shows the live numbers next to them as they accrue.
-4. **Scheduler risk.** GitHub cron is best-effort and dropped a whole day before go-live. Three slots and a catch-up cover delays; a day with no run at all is visible on the dashboard but does not open an issue.
+4. **Scheduler risk, mitigated rather than eliminated.** GitHub cron lost the first two live days (2026-10-13 and 14), so the trigger moved to EventBridge, with an output check and an email alert. The runners themselves still live on GitHub.
 5. **Hour-ahead is out of scope.** Data cost, not modelling: the GridStatus free plan (250 requests a month) cannot support hourly refreshes ([FINDINGS section 8](audit/FINDINGS.md)).
 6. **Reproducibility needs credentials.** Data lives in a private DVC remote and runs in a private MLflow. The test suite (leakage, parity, gates, API, monitoring) needs neither and runs on every push.
 
@@ -183,7 +190,8 @@ uv run --env-file .env python scripts/forecast_day.py --dry-run         # tomorr
 1. Run `infra/bootstrap.yaml` once in CloudShell.
 2. Apply `sql/` with `scripts/db_migrate.py`, and create the three role logins with `scripts/set_role_login.py` (it stores each as a GitHub secret).
 3. Run the `deploy-api` workflow (input: a model version, or `champion`).
-4. The `daily` workflow runs at 10:00 Central:
+4. Once, in CloudShell: store a fine-grained GitHub token (this repo only, Actions read/write) as the SSM SecureString `/shef2/github-dispatch-token`, then deploy `infra/scheduler.yaml` (stack `shef2-scheduler`) and confirm the SNS email.
+5. The `daily` workflow then runs at 10:05 Central:
    - it snapshots the weather forecast to DVC;
    - it forecasts tomorrow through the API from that same snapshot;
    - it backfills actual load.

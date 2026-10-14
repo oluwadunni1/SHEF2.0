@@ -3,17 +3,26 @@
 #   2. forecast tomorrow from THAT snapshot through the deployed API -> Supabase
 #   3. send realised load so yesterday's rows get actual_load_mw
 #   4. monitoring: served-weather error vs ERA5 / training proxy, input drift,
-#      ERCOT's own forecast for tomorrow (benchmark, quota permitting)
+#      load latency, ERCOT's own forecast for tomorrow (quota permitting)
 #   5. publish the dashboard to GitHub Pages
 #
-# GitHub cron is UTC-only and best-effort (a whole day was dropped on
-# 2026-10-12), so there are three slots, at :07 to avoid top-of-hour load:
-#   15:07 / 16:07 UTC  whichever is 10:xx Central (CDT / CST) is the issue run
-#   17:37 UTC          catch-up: snapshot only if today's is missing, then
-#                      forecast (idempotent: logs nothing if already done)
+# Triggers. GitHub cron is best-effort: it dropped 2026-10-12 entirely and ran
+# 2026-10-13's slots 5.5-6.5 h late. So the clock is AWS EventBridge Scheduler
+# (infra/scheduler.yaml): 10:05 America/Chicago, with retries, dispatching this
+# workflow (source=eventbridge), and a 13:00 check that tomorrow's forecast was
+# logged, which alerts by email and dispatches a catch-up if not. The two cron
+# lines below are backups only.
+#
+# Modes, decided at run time on the Central clock:
+#   dry      manual dry run: snapshot without storing, signed /health, log nothing
+#   issue    10:xx Central
+#   catchup  11:00-23:59 Central: a late run still forecasts. Load is cut at the
+#            10:00 issue time whenever it runs; only the weather is a later run.
+#   skip     before 10:00 (issue time not reached), or tomorrow already logged
+#            (checked first, so duplicate triggers cost no GridStatus requests)
 # A fallback forecast (missing forecast temperature) exits 2 and fails the run.
-# Any failed scheduled run, including a monitoring step that failed quietly
-# under continue-on-error, opens (or comments on) an "ops-alert" issue.
+# A failed scheduled/EventBridge run, including a monitoring step that failed
+# quietly under continue-on-error, opens (or comments on) an "ops-alert" issue.
 #
 # Credentials: the AWS_* secrets are Cloudflare R2 keys for DVC and are given
 # only to the DVC steps. Real AWS access is the OIDC forecast role, assumed
@@ -21,16 +30,19 @@
 name: daily
 
 on:
-  schedule:
-    - cron: "7 15 * * *"
-    - cron: "7 16 * * *"
-    - cron: "37 17 * * *"
+  schedule:                       # backups for the EventBridge trigger
+    - cron: "37 16 * * *"         # 11:37 CDT / 10:37 CST
+    - cron: "37 22 * * *"         # 17:37 CDT / 16:37 CST
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Snapshot without storing, check the API, log nothing (any hour)"
         type: boolean
         default: true
+      source:
+        description: "Who triggered it (eventbridge runs alert on failure like scheduled ones)"
+        type: string
+        default: manual
 
 permissions:
   contents: write
@@ -52,21 +64,34 @@ jobs:
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
+      - uses: astral-sh/setup-uv@v10.3.0
       - name: Which slot is this?
         id: slot
+        env:
+          DASHBOARD_DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
         run: |
-          hour=$(TZ=America/Chicago date +%H)
+          hour=$(TZ=America/Chicago date +%-H)
+          tomorrow=$(TZ=America/Chicago date -d tomorrow +%F)
+          why=""
           if [ "$DRY_RUN" = "true" ]; then mode=dry
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then mode=catchup
-          elif [ "$hour" = "10" ]; then mode=issue
-          elif [ "$hour" = "11" ] || [ "$hour" = "12" ]; then mode=catchup
-          else mode=skip; fi
+          elif [ "$hour" -lt 10 ]; then mode=skip; why="before 10:00 Central: the issue time for $tomorrow has not arrived"
+          else
+            # Read-only role; any database trouble counts as "not logged" so it never blocks a forecast.
+            logged=$(uv run --no-project --quiet --with "psycopg[binary]" python -c "
+          import os, psycopg
+          try:
+              with psycopg.connect(os.environ['DASHBOARD_DATABASE_URL'], prepare_threshold=None, connect_timeout=15) as c:
+                  print(c.execute('SELECT count(*) FROM monitoring.v_live WHERE served_first AND target_day = %s', ('$tomorrow',)).fetchone()[0])
+          except Exception:
+              print(0)" || echo 0)
+            if [ "$logged" -ge 23 ]; then mode=skip; why="forecast for $tomorrow already logged ($logged hours)"
+            elif [ "$hour" = 10 ]; then mode=issue
+            else mode=catchup; fi
+          fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z'): mode=$mode"
+          echo "$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z'): mode=$mode ${why:+($why)}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/checkout@v7
-        if: steps.slot.outputs.mode != 'skip'
-      - uses: astral-sh/setup-uv@v10.3.0
         if: steps.slot.outputs.mode != 'skip'
       - name: Install
         if: steps.slot.outputs.mode != 'skip'
@@ -188,7 +213,7 @@ jobs:
   alert:
     needs: [day-ahead, dashboard]
     if: >-
-      always() && github.event_name == 'schedule' &&
+      always() && (github.event_name == 'schedule' || inputs.source == 'eventbridge') &&
       (needs.day-ahead.result == 'failure' || needs.dashboard.result == 'failure' ||
        needs.day-ahead.outputs.monitor == 'failure')
     runs-on: ubuntu-latest

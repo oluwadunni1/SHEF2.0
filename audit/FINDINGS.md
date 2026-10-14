@@ -248,11 +248,38 @@ None of this was tuned on the holdout. Any challenger goes through the monthly p
   - a monitoring step that failed under `continue-on-error`.
 - **README:** model card, a limitations section, and a least-privilege role table.
 
-## 11. Still open
+## 11. GitHub cron lost the first live days, so the clock moved to EventBridge (2026-10-14)
+
+- **2026-10-12:** no scheduled run at all.
+- **2026-10-13:** all three slots ran, but late:
+
+  | slot (UTC) | started (UTC) | Central time |
+  |---|---|---|
+  | 15:07 | 20:36 | 15:36 |
+  | 16:07 | 21:08 | 16:08 |
+  | 17:37 | 21:56 | 16:56 |
+
+  The slot logic only accepted 10:00–12:59 Central, so each run chose `skip` and finished **green**. Nothing was forecast for 2026-10-14, and no alert fired, because nothing failed.
+
+The lesson is twofold. The trigger is the unreliable part (GitHub runs `workflow_dispatch` immediately; the cron trigger is best-effort). And "the job passed" is the wrong thing to monitor.
+
+Changes:
+- **Clock: EventBridge Scheduler** (`infra/scheduler.yaml`).
+  - Runs at 10:05 America/Chicago, so the time zone handles DST and the two UTC slots are gone.
+  - Delivery is retried, and a Lambda dispatches `daily.yml`.
+  - The Lambda's own retries end in an SNS topic.
+  - Its only credential is a fine-grained GitHub token in an SSM SecureString, readable by that one function.
+- **Output check: 13:00 Central.** The same Lambda calls the API's new `GET /logged?target_day=` (SigV4-signed; `api_writer` can count live hours, and RLS hides backtest rows from it). If tomorrow's day is incomplete, it emails and dispatches a catch-up.
+- **The catch-up window is widened to midnight Central.** A late run is still a valid forecast: load is cut at the 10:00 issue time; only the weather is a later run, and the run warns about it.
+- **Duplicate triggers are free.** A run first asks the read-only role whether tomorrow is already logged and exits before any GridStatus request. The monitor skips ERCOT's forecast when it is already stored. Without this, the extra triggers could have exhausted the 250-request plan.
+- GitHub cron is kept as a backup (16:37 and 22:37 UTC).
+- CI now runs `cfn-lint` on `infra/`. It caught an unquoted `: ` in `api.yaml` before it reached a deploy.
+
+## 12. Still open
 
 - [ ] GridStatus publish latency p99: accumulating daily in `monitoring.load_latency` (section 10). Needs a few weeks before it can be called a p99.
 - [ ] 7 consecutive unattended `daily` runs (P5 definition of done). The first scheduled run is 2026-10-13 15:07 UTC.
-- [ ] A day when GitHub drops every cron slot opens no issue. It shows only as a stale "latest forecast" on the dashboard.
+- [x] ~~A day when GitHub drops every cron slot opens no issue.~~ The 13:00 output check alerts by email (section 11).
 - [ ] Prediction intervals; a level-adaptive challenger for record-demand periods (README limitations).
 - [x] Confirm Open-Meteo `previous_day1` lead definition: predicted 24 h before valid time
 - [x] Weather model: `gfs_seamless` (identical to `best_match` in the archive; pinned for live parity)

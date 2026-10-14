@@ -1,4 +1,5 @@
-# Unit tests, including the leakage and parity tests for the feature builder.
+# Unit tests (including the leakage and parity tests for the feature builder)
+# and a lint of the CloudFormation templates.
 # They use synthetic data only, so no secrets or DVC pull are needed.
 name: tests
 
@@ -16,3 +17,5 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
       - run: uv sync --frozen
       - run: uv run pytest -q
+      - name: Lint CloudFormation templates
+        run: uvx cfn-lint infra/*.yaml
