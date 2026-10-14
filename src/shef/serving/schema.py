@@ -134,6 +134,13 @@ class ActualsResponse(BaseModel):
     updated: int
 
 
+class LoggedResponse(BaseModel):
+    target_day: date
+    hours_logged: int
+    hours_expected: int
+    complete: bool
+
+
 class HealthResponse(BaseModel):
     status: str
     model_name: str

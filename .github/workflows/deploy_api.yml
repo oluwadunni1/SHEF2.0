@@ -95,7 +95,11 @@ jobs:
           echo "uri=$REPO:$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Deploy stack
+        env:
+          # api_writer (sql/006): insert forecasts + fill actuals only; never the postgres URL
+          API_DATABASE_URL: ${{ secrets.API_DATABASE_URL }}
         run: |
+          test -n "$API_DATABASE_URL" || { echo "::error::secret API_DATABASE_URL is not set (scripts/set_role_login.py)"; exit 1; }
           # A first create that failed leaves ROLLBACK_COMPLETE, which can only be deleted.
           STATUS=$(aws cloudformation describe-stacks --stack-name shef2-api \
                    --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo NONE)
@@ -110,7 +114,7 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               "ImageUri=${{ steps.image.outputs.uri }}" \
-              "DatabaseUrl=${{ secrets.SUPABASE_DATABASE_URL }}"
+              "DatabaseUrl=$API_DATABASE_URL"
 
       - name: Smoke test /health (signed with this job's role)
         run: |

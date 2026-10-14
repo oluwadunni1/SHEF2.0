@@ -7,6 +7,7 @@ the client (scripts/forecast_day.py -> features.live.build_live).
     GET  /health     which model is serving
     POST /forecast   one day of rows -> 23-25 hourly forecasts
     POST /actuals    realised load -> fills actual_load_mw
+    GET  /logged     how many hours of a target day are logged (the 13:00 scheduler check)
 
 Authentication is not in this code: the Function URL uses AWS_IAM auth, so
 Lambda rejects any request not SigV4-signed by a principal allowed to invoke
@@ -22,6 +23,7 @@ cold start. Locally:
 import json
 import logging
 import os
+from datetime import date
 from pathlib import Path
 from typing import Callable
 
@@ -33,7 +35,8 @@ from fastapi.responses import JSONResponse
 from shef.models.predict import Champion, ForecastIncomplete
 from shef.serving import db
 from shef.serving.schema import (ActualsRequest, ActualsResponse, ForecastResponse, HealthResponse,
-                                 HourForecast, build_request_model)
+                                 HourForecast, LoggedResponse, build_request_model)
+from shef.timestamps import central_day_bounds, central_day_hours
 
 log = logging.getLogger("shef.api")
 log.setLevel(logging.INFO)
@@ -44,7 +47,8 @@ BASELINE_COLUMN = "load_same_hour_latest"
 
 def create_app(champion: Champion, meta: dict,
                log_predictions: Callable[[list[dict]], int] = db.log_predictions,
-               log_actuals: Callable[[list[dict]], int] = db.log_actuals) -> FastAPI:
+               log_actuals: Callable[[list[dict]], int] = db.log_actuals,
+               count_logged: Callable[..., int] = db.count_logged) -> FastAPI:
     app = FastAPI(title="SHEF 2.0 day-ahead load forecast", version=str(meta["model_version"]))
     Request_ = build_request_model(champion.features)
 
@@ -105,6 +109,12 @@ def create_app(champion: Champion, meta: dict,
     def actuals(body: ActualsRequest):
         updated = log_actuals([{"ts_utc": a.ts_utc, "load_mw": a.load_mw} for a in body.actuals])
         return ActualsResponse(received=len(body.actuals), updated=updated)
+
+    @app.get("/logged", response_model=LoggedResponse)
+    def logged(target_day: date):
+        start, end = central_day_bounds(target_day)
+        n, expected = count_logged(start.to_pydatetime(), end.to_pydatetime()), central_day_hours(target_day)
+        return LoggedResponse(target_day=target_day, hours_logged=n, hours_expected=expected, complete=n >= expected)
 
     return app
 

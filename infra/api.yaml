@@ -9,6 +9,7 @@ Parameters:
   DatabaseUrl:
     Type: String
     NoEcho: true
+    Description: "api_writer pooler URL (sql/006): insert forecasts, fill actuals, count logged hours"
 
 Resources:
   Logs:

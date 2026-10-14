@@ -37,8 +37,11 @@ def api(setup):
         logged.extend(records)
         return len(records)
 
+    def fake_count(start, end):
+        return len({r["target_timestamp"] for r in logged if start <= r["target_timestamp"] < end})
+
     app = create_app(champ, META, log_predictions=fake_log,
-                     log_actuals=lambda a: actuals.extend(a) or len(a))
+                     log_actuals=lambda a: actuals.extend(a) or len(a), count_logged=fake_count)
     return TestClient(app), champ, days, logged, actuals
 
 
@@ -146,6 +149,16 @@ def test_actuals(api):
     r = c.post("/actuals", json=body)
     assert r.json() == {"received": 1, "updated": 1} and actuals[0]["load_mw"] == 9000.0
     assert c.post("/actuals", json={"actuals": [{"ts_utc": "2025-08-05T05:00:00+00:00", "load_mw": -1}]}).status_code == 422
+
+
+def test_logged_reports_whether_a_day_landed(api):
+    c, champ, days, *_ = api
+    before = c.get("/logged", params={"target_day": "2025-11-02"}).json()
+    assert before == {"target_day": "2025-11-02", "hours_logged": 0, "hours_expected": 25, "complete": False}
+    post(c, body_for(days[date(2025, 11, 2)], champ))                     # the 25-hour fall-back day
+    after = c.get("/logged", params={"target_day": "2025-11-02"}).json()
+    assert after["hours_logged"] == 25 and after["complete"]
+    assert c.get("/logged", params={"target_day": "not-a-date"}).status_code == 422
 
 
 def test_bounds_match_the_clean_gate():
