@@ -77,7 +77,7 @@ Built by `scripts/backfill.py` then `scripts/build_clean.py`. Every stage passes
 **Live forecast archive** (`data/raw/weather_fc_live`):
 - `scripts/snapshot_forecast.py` stores what we would serve: 3 past days plus 3 forecast days, all four cities.
 - The first snapshot was taken 2026-10-11 16:59 CDT. That's a test, not issue-time.
-- Two Windows tasks (16:00 and 17:00 WAT, which is 15:00 and 16:00 UTC) run `scripts/snapshot_forecast.cmd`. `--only-at-issue` keeps only the run at 10:xx Central.
+- Two Windows tasks (16:00 and 17:00 WAT, which is 15:00 and 16:00 UTC) run `scripts/snapshot_forecast.cmd`. `--only-at-issue` keeps only the run at 10:xx Central. *(Retired 2026-10-15: `daily.yml` archived its first snapshot on 2026-10-14 and logged the first live forecast, for 2026-10-15. The tasks and the `.cmd` are deleted.)*
 - Running the wrapper by hand works. Whether the task-launched run writes its log is **unverified**: check `data/reports/snapshot_forecast.log` after the first scheduled run.
 
 **Raised for P2:**
