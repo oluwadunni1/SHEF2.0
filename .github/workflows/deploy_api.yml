@@ -128,4 +128,8 @@ jobs:
           t = time.time(); h = client.get(sys.argv[1], '/health')
           assert h['status'] == 'ok' and h['model_version'] == os.environ['MODEL_VERSION'], h
           print(f'signed /health in {time.time() - t:.1f}s: serving', h['model_name'], 'v' + h['model_version'],
-                'run', h['mlflow_run_id'], '|', len(h['features']), 'features')" "$URL"
+                'run', h['mlflow_run_id'], '|', len(h['features']), 'features')
+          # A database round trip as api_writer: 2026-10-15 is the first live day, fully logged.
+          g = client.get(sys.argv[1], '/logged?target_day=2026-10-15')
+          assert g['hours_logged'] == 24 and g['complete'], g
+          print('signed /logged as api_writer:', g)" "$URL"
