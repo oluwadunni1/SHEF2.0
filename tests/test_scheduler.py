@@ -73,6 +73,17 @@ def test_check_alerts_and_catches_up_when_missing(fn):
     assert len(calls["posts"]) == 1 and len(calls["alerts"]) == 1 and "missing" in calls["alerts"][0]
 
 
+def test_alert_goes_out_even_if_the_catch_up_dispatch_fails(fn):
+    mod, calls = fn
+    calls["status"] = {"target_day": "x", "hours_logged": 0, "hours_expected": 24, "complete": False}
+    def bad_token():
+        raise PermissionError("401 Unauthorized")
+    mod._token = bad_token
+    with pytest.raises(PermissionError):
+        mod.handler({"action": "check"}, None)
+    assert len(calls["alerts"]) == 1
+
+
 def test_unknown_action_fails_loudly(fn):
     mod, _ = fn
     with pytest.raises(ValueError):

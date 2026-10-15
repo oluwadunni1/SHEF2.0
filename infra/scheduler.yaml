@@ -154,11 +154,12 @@ Resources:
                   status = logged(day)
                   print(json.dumps(status))
                   if not status["complete"]:
-                      dispatch(f"catch-up: {day} had {status['hours_logged']}/{status['hours_expected']} hours at {now:%H:%M %Z}")
+                      # Alert first: the human hears about it even if the catch-up dispatch then fails.
                       _alert(f"SHEF2: forecast for {day} missing at {now:%H:%M %Z}",
                              f"Only {status['hours_logged']} of {status['hours_expected']} hours of the {day} forecast "
-                             f"were logged by {now:%Y-%m-%d %H:%M %Z}. A catch-up run of daily.yml was dispatched; "
+                             f"were logged by {now:%Y-%m-%d %H:%M %Z}. Dispatching a catch-up run of daily.yml; "
                              f"check https://github.com/{os.environ['REPO']}/actions/workflows/daily.yml")
+                      dispatch(f"catch-up: {day} had {status['hours_logged']}/{status['hours_expected']} hours at {now:%H:%M %Z}")
                   return status
               raise ValueError(f"unknown action {action!r}")
 
