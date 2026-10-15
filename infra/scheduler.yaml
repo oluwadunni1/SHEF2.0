@@ -58,7 +58,8 @@ Resources:
                   StringEquals: {kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"}
               - Sid: AskTheApi
                 Effect: Allow
-                Action: lambda:InvokeFunctionUrl
+                # A Function URL with AuthType AWS_IAM needs both (as the forecast role in bootstrap.yaml has).
+                Action: [lambda:InvokeFunctionUrl, lambda:InvokeFunction]
                 Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:shef2-api
               - Sid: Alert
                 Effect: Allow
