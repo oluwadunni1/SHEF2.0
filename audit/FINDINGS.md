@@ -273,6 +273,11 @@ Changes:
 - **The catch-up window is widened to midnight Central.** A late run is still a valid forecast: load is cut at the 10:00 issue time; only the weather is a later run, and the run warns about it.
 - **Duplicate triggers are free.** A run first asks the read-only role whether tomorrow is already logged and exits before any GridStatus request. The monitor skips ERCOT's forecast when it is already stored. Without this, the extra triggers could have exhausted the 250-request plan.
 - GitHub cron is kept as a backup (16:37 and 22:37 UTC).
+- **Deployed 2026-10-15 and tested end to end from CloudShell.** Two first-run failures were fixed:
+  - the API answered 403, because a Function URL with IAM auth needs `lambda:InvokeFunction` as well as `lambda:InvokeFunctionUrl`;
+  - GitHub answered 401, because the token had been pasted twice into SSM (186 characters, not 93).
+
+  The check also now alerts before it dispatches, so a failed catch-up can't be silent. A manual `{"action":"dispatch"}` started `daily` within seconds, and it correctly chose `skip` (06:50 Central, before the issue time).
 - CI now runs `cfn-lint` on `infra/`. It caught an unquoted `: ` in `api.yaml` before it reached a deploy.
 
 ## 12. Still open
