@@ -12,14 +12,14 @@
 
 issue:
   # LOCKED 2026-10-11. 10:00 Central local time all year = ERCOT day-ahead
-  # market close. GitHub cron is UTC-only, so the workflow schedules both
-  # 15:00 UTC (CDT) and 16:00 UTC (CST) and proceeds only on the run where
-  # local time is 10:xx. Training replay uses the same local-time rule.
+  # market close. The trigger is EventBridge Scheduler at 10:05 America/Chicago
+  # (infra/scheduler.yaml), so DST is handled by the time zone; daily.yml decides
+  # the mode on the Central clock. Training replay uses the same local-time rule.
   mode: day_ahead
   issue_time_local: "10:00"
   timezone: America/Chicago
   dst_rule: fixed_local_time
-  cron_utc: ["0 15 * * *", "0 16 * * *"]
+  trigger: "EventBridge cron(5 10 * * ? *) America/Chicago; GitHub cron backups"
   target_day_offset: 1
   lead_hours: [14, 38]
 
