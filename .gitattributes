@@ -1,0 +1,2 @@
+# Notebooks are the research record, not the system: keep them out of GitHub's language stats.
+*.ipynb linguist-documentation
