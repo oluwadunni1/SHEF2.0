@@ -1,199 +1,109 @@
-# SHEF 2.0: day-ahead hourly load forecast, ERCOT South Central
+# SHEF 2.0: Short-term Electricity Forecasting
 
 [![tests](https://github.com/oluwadunni1/SHEF2.0/actions/workflows/tests.yml/badge.svg)](https://github.com/oluwadunni1/SHEF2.0/actions/workflows/tests.yml)
 [![daily](https://github.com/oluwadunni1/SHEF2.0/actions/workflows/daily.yml/badge.svg)](https://github.com/oluwadunni1/SHEF2.0/actions/workflows/daily.yml)
 [![dashboard](https://img.shields.io/badge/live-dashboard-2a6f97)](https://oluwadunni1.github.io/SHEF2.0/)
+[![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-Every day at **10:00 Central**, forecast each hour of tomorrow's electricity load for ERCOT's South Central weather zone (Austin and San Antonio), using only data that is actually available at 10:00.
+A production forecasting system: every day at **10:00 Central** it forecasts each hour of tomorrow's electricity load for ERCOT's South Central zone (Austin and San Antonio), logs the forecast with its exact inputs, scores itself against published load, and publishes a [live dashboard](https://oluwadunni1.github.io/SHEF2.0/).
 
-| | MAPE | Peak-MAPE | RMSE |
-|---|---|---|---|
-| Baseline: freshest legal same-hour load | 7.62% | 3.79% | 1,013 MW |
-| **LightGBM + trend target** | **3.79%** | **3.38%** | **482 MW** |
-
-**Against ERCOT's own published forecast** (the 09:30 CT publish, the same information cut-off), on 120 matched summer days of 2026:
-- ERCOT is better overall: **2.79% vs 3.65%** MAPE.
-- The gap is systematic under-forecasting while demand set records (our September bias −4.3%).
-- In July we beat ERCOT (2.85% vs 3.06%).
-- Details: [FINDINGS section 9](audit/FINDINGS.md).
-
-Holdout: Aug 2025 → Oct 2026. It was scored once, on archived weather *forecasts* (not observed weather), after model selection on three yearly CV folds (CV: 4.18% / 2.99%).
-
-## Why v2 exists
-
-v1 reported 2.84% MAPE, but it trained and scored with two inputs a 10:00 forecast cannot have:
-- yesterday's load for every hour (at 10:00, hours 09–23 are not published yet);
-- observed weather in place of a forecast.
-
-v2 is rebuilt around one rule, enforced by a test rather than by convention:
+It is built around one rule, enforced by tests rather than convention, so the backtest cannot be better than production:
 
 > A feature is allowed only if `source_time + publish_latency <= issue_time`.
+
+## Results
+
+| Holdout Aug 2025 → Oct 2026, scored once | MAPE | Peak-MAPE | RMSE |
+|---|---|---|---|
+| Baseline: freshest legal same-hour load | 7.62% | 3.79% | 1,013 MW |
+| **SHEF: LightGBM on a trend-residual target** | **3.79%** | **3.38%** | **482 MW** |
+| ERCOT's own forecast, 120 matched days (Jun–Oct 2026) | 2.79% | 2.52% | 437 MW |
+
+- Scored on **archived weather forecasts**, not observed weather, after selection on three yearly CV folds.
+- ERCOT's operator forecast is better overall (ours: 3.65% on the same hours). The gap is under-forecasting while demand set records; in July SHEF was ahead. See [FINDINGS §9](audit/FINDINGS.md).
+- Live since 14 Oct 2026; live accuracy next to the backtest is on the [dashboard](https://oluwadunni1.github.io/SHEF2.0/).
+
+## Why a v2
+
+v1 reported **2.84% MAPE**. It was wrong: it trained and scored with yesterday's load for every hour (at 10:00, hours 09–23 are not published yet) and with observed weather instead of a forecast. Neither exists when the forecast is made.
+
+v2 rebuilds the pipeline so every feature is computed as of the issue time, and a test proves it: poison every value after the cutoff and assert no feature changes. Re-inserting v1's mistake makes it fail. The honest number is higher, and it holds up live.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph sources
-    GS[GridStatus<br/>ERCOT load]
-    OM[Open-Meteo<br/>ERA5 + forecasts]
-  end
-  subgraph "data layer (P1)"
-    RAW[raw parquet<br/>DVC → R2] --> GATE{{Pandera gates}} --> CLEAN[clean + joined<br/>one UTC hour key]
-  end
-  subgraph "features (P2)"
-    ASOF[as-of views<br/>load_as_of / weather_as_of] --> FB[build_features<br/>one code path]
-  end
-  subgraph "models (P3)"
-    NB[notebooks 01–05] --> MLF[(DagsHub MLflow<br/>runs + registry)]
-  end
-  subgraph "serving (P4)"
-    GHA[GitHub Actions<br/>OIDC, forecast role] -- SigV4 --> URL[Lambda Function URL<br/>AWS_IAM auth]
-    URL --> API[FastAPI container<br/>model baked in]
-    API --> SB[(Supabase<br/>predictions)]
-  end
-  subgraph "operations (P5–P7)"
-    MON[monitor<br/>weather error · drift<br/>latency · ERCOT benchmark] --> MS[(Supabase<br/>monitoring schema)]
-    MS --> DASH[GitHub Pages<br/>dashboard]
-    PROMO[monthly promote<br/>champion vs challenger] -- "@champion alias" --> MLF
-  end
-  GS --> RAW
-  OM --> RAW
-  CLEAN --> ASOF
-  FB --> NB
-  MLF -- deploy workflow --> API
-  GS --> GHA
-  OM --> GHA
-  GHA --> MON
-  SB --> MS
+  GS[GridStatus<br/>ERCOT load] --> DATA
+  OM[Open-Meteo<br/>ERA5 + forecasts] --> DATA
+  DATA[DVC on R2<br/>Pandera gates] --> FEAT[as-of features<br/>one code path]
+  FEAT --> TRAIN[notebooks<br/>MLflow registry]
+  EB[EventBridge<br/>10:05 Central] --> GHA[GitHub Actions<br/>daily job]
+  GHA -- SigV4 --> API[FastAPI on Lambda<br/>model baked in]
+  TRAIN -- "@champion" --> API
+  API --> DB[(Supabase<br/>forecasts + actuals)]
+  DB --> MON[monitoring<br/>drift · weather · ERCOT]
+  MON --> DASH[GitHub Pages<br/>dashboard]
+  MON --> PROMO[monthly<br/>champion vs challenger]
 ```
 
-The jobs run in GitHub Actions: `daily` (10:00 Central), `promote` (monthly), `deploy-api` (on serving changes or a promotion), `tests` (every push). The **clock is AWS EventBridge Scheduler** (`infra/scheduler.yaml`), not GitHub cron:
-- At 10:05 America/Chicago it dispatches `daily`, with retries.
-- At 13:00 it asks the API whether tomorrow's forecast was logged. If not, it emails an alert and dispatches a catch-up.
-- GitHub cron stays as a backup.
+**Stack:** Python 3.14, LightGBM, pandas, Pandera, FastAPI · MLflow (DagsHub) · DVC (Cloudflare R2) · AWS Lambda, ECR, EventBridge Scheduler, SNS, CloudFormation · GitHub Actions (OIDC) · Supabase Postgres · GitHub Pages.
 
-GitHub cron is best-effort: it dropped 2026-10-12 and ran 2026-10-13's three slots 5.5 to 6.5 hours late.
+## Engineering highlights
 
-## Design decisions worth reading
+- **Leakage-safe by construction.** Training replays every historical 10:00 issue through the same `build_features` that serving uses. A poisoned-future test (mutation-tested) and a live-vs-replay parity test guard it.
+- **Honest validation.** Trained on observed weather, scored on the archived day-ahead forecasts the model would actually have had; the served forecast is archived daily so live inputs match.
+- **Gated promotion.** A monthly job retrains a challenger and promotes it only if MAPE improves by ≥ 0.10 points without a worse peak. A rehearsal kept the champion: a month of extra data was worth −0.04 points.
+- **Monitoring that was calibrated, not copied.** Textbook PSI thresholds flagged ordinary weather every day; thresholds are calibrated on 1,000+ historical windows, and still catch unit errors and frozen feeds.
+- **Fails safe.** If forecast temperature is missing for any hour, the API serves a flagged baseline instead of a silent bad prediction, and the run opens an alert.
+- **No long-lived keys, least privilege.** GitHub assumes AWS roles via OIDC; the API URL accepts only signed requests; each component logs into Postgres as its own role, and each role was probed for what it can't do.
+- **A real incident, fixed.** GitHub cron silently dropped the first live days while every run was green. The clock moved to EventBridge, and a 13:00 check asks the API whether tomorrow's forecast exists, alerting by email if not. ([FINDINGS §11](audit/FINDINGS.md))
 
-- **Point-in-time features.** Training replays every historical 10:00 issue through the same `build_features` that serving uses, fed by `load_as_of` / `weather_as_of`.
-  - A **leakage test** poisons every value after the cutoff and asserts no feature moves. It is mutation-tested: planted leaks are caught.
-  - A **parity test** asserts that the live path equals replay.
-- **One time key.** `ts_utc` is the UTC start of the hour a value describes. Open-Meteo's `time` labels the end of an accumulation hour, so v1 had precipitation one hour early.
-- **Honest validation.** Models train on ERA5 history (2016+) but are scored on *archived* day-ahead forecasts (Open-Meteo Previous Runs, `gfs_seamless`). That's the same weather model serving uses.
-- **The forecast gate.** A model trained on ERA5 has never seen a missing temperature. In a 2024 archive gap it produced errors of 30–60%.
-  - If any target hour lacks forecast temperature, the API serves the baseline instead.
-  - It labels that `status: fallback` / `model_name = baseline_same_hour_latest`, and the daily job fails loudly.
-- **Serving boundary.** The API validates a full Central day: 23–25 rows, the 10:00 issue time, the weather model, physical bounds, and no unknown fields.
-  - It derives the fitted features (trend, holiday frequency, extreme-event flags) itself from the bundle shipped with the model.
-  - Every hour is logged with its exact model inputs, issue time, lead time, weather model and MLflow run id.
-- **No long-lived cloud keys.**
-  - GitHub Actions assumes AWS roles through OIDC. The trust is pinned to the repo's immutable owner/repo ids.
-  - Deploying and forecasting use separate roles.
-  - The Function URL only accepts SigV4-signed requests.
-- **Least privilege in the database too.** Each component logs in as its own Postgres role, and every role was probed for what it can and cannot do:
-
-  | role | used by | can | cannot |
-  |---|---|---|---|
-  | `api_writer` | Lambda | insert forecasts, fill `actual_load_mw` | read features, delete, change a forecast, see or touch backtest rows (RLS) |
-  | `monitor_writer` | daily monitoring | write the monitoring tables, read the monitoring views | read or write `predictions` |
-  | `dashboard_reader` | Pages build | read the monitoring views | write anything, read `predictions` directly |
-
-  The `postgres` login is only used for migrations (`scripts/db_migrate.py`), from a laptop.
-- **One model version per image.** The deploy workflow pulls a registered version from MLflow and bakes it into the image.
-  - It then tests the image under the Lambda runtime emulator before any AWS step.
-  - After the deploy, it checks that an unsigned call gets `403` and a signed one reports the expected version.
-- **Batch problem, service boundary.** A daily forecast is batch prediction. The API exists to give the model a versioned, validated boundary, and so on-demand or what-if requests need no new code.
-
-## Monitoring and promotion
-
-**Live dashboard: https://oluwadunni1.github.io/SHEF2.0/** It's rebuilt after every daily run from a read-only database role.
-
-- **Accuracy.** Live 30-day MAPE, Peak-MAPE, RMSE and bias next to the holdout backtest. The backtest rows sit in the same table under `backtest-1`, and the SQL views reproduce P3's 3.79% / 3.38% / 482 MW exactly.
-- **Served weather.** Each archived `gfs_seamless` snapshot is scored once ERA5 is final:
-  - against what was observed;
-  - against the archived forecast the model was trained on. This checks that the training proxy matches what serving actually sees.
-- **Input drift.** PSI on the hourly inputs against the same calendar month in the last 3 training years.
-  - Textbook PSI thresholds flag ordinary weather every day here. So the thresholds are **calibrated** on 1,000+ historical 14-day windows: watch above the 95th percentile, drift above the 99th.
-  - Daily-level features are excluded because their PSI saturates.
-  - It catches unit errors and frozen feeds (PSI ≈ 8.3). It also flagged real early-October 2026 load growth.
-- **Promotion (monthly).**
-  - The data is refreshed through the DVC pipeline.
-  - The champion's recipe is retrained on newer data, and both models are scored on the latest 28 labelled days neither has seen (rolling origin).
-  - The challenger is promoted only if MAPE improves by ≥ 0.10 points without a worse Peak-MAPE.
-  - A promotion registers vN, moves the MLflow `@champion` alias and redeploys.
-  - A rehearsal on Sep 2026 kept the champion: 4 more weeks of training data gave −0.04 points of MAPE and a worse peak. The margin is there to prevent that kind of churn.
-
-- **Operations.**
-  - **Publishing latency** is measured for free. Every daily load fetch records the newest hour GridStatus returned, which brackets how late the next hour is. This tests the 1-hour cutoff the features assume, instead of trusting one P0 sample.
-  - **Failures open a GitHub issue** (`ops-alert`): a failed or fallback forecast, a failed dashboard build, or a monitoring step that failed quietly under `continue-on-error`. One issue per day; later runs comment on it.
-  - **A missing forecast is caught by checking the output, not the job.** On 2026-10-13 every run was green and nothing was forecast: the runs were late and correctly skipped. The 13:00 check asks the API itself (`GET /logged`) whether tomorrow's 23–25 hours exist.
-  - **Late runs still forecast.** Any run from 10:00 Central to midnight forecasts, with load still cut at 10:00. A run that finds tomorrow already logged exits before spending any GridStatus requests.
+Details: [operations](docs/OPERATIONS.md) · [monitoring and promotion](docs/MONITORING.md) · [every measurement and decision](audit/FINDINGS.md).
 
 ## Model card
 
 | | |
 |---|---|
-| **Model** | `shef2-day-ahead` v1 (`@champion`), LightGBM (default parameters) on a trend-residual target, 42 point-in-time features. MLflow pyfunc: forecast gate, feature bundle and trend line ship inside it. |
-| **Predicts** | Hourly load (MW), ERCOT South Central weather zone, all 23–25 hours of the next Central day, issued at 10:00 Central (lead 14–38 h). |
-| **Training data** | GridStatus `ercot_load_by_weather_zone` and ERA5 weather (4 cities, population-weighted), 2016-01-12 → 2026-10-09. Winter Storm Uri load-shed days excluded. |
-| **Weather at inference** | Open-Meteo `gfs_seamless` day-ahead forecast, archived at issue time (DVC). Trained on observed weather, validated on archived forecasts. |
-| **Evaluation** | Holdout Aug 2025 → Oct 2026, scored once: **3.79% MAPE**, 3.38% Peak-MAPE, 482 MW RMSE (5.1% of mean load), −0.17% bias. Seasonal baseline 7.62%. ERCOT's own forecast on 120 matched days: 2.79% vs our 3.65%. |
-| **Intended use** | A portfolio demonstration of a leakage-safe forecasting system. Not an operational dispatch or trading signal. |
-| **Known failure modes** | Under-forecasts during record-breaking demand (Sep 2026 bias −4.3%): tree models cannot extrapolate beyond the training range, and the trend term adapts slowly. Largest misses come from wrong weather forecasts (convective rain, frontal timing), which the model cannot see. No prediction if forecast temperature is missing: the baseline is served instead and flagged. |
-| **Not modelled** | Prediction intervals, price response, outages and load shed, rooftop solar growth beyond the trend. |
+| **Model** | `shef2-day-ahead` v1 (`@champion`): LightGBM, default parameters, trend-residual target, 42 point-in-time features. MLflow pyfunc with the forecast gate and feature bundle inside. |
+| **Predicts** | Hourly load (MW), ERCOT South Central, all 23–25 hours of the next Central day, issued 10:00 Central (lead 14–38 h). |
+| **Data** | GridStatus `ercot_load_by_weather_zone`; ERA5 weather for 4 population-weighted cities; 2016 → Oct 2026, Winter Storm Uri load-shed days excluded. |
+| **Inference weather** | Open-Meteo `gfs_seamless` forecast, archived at issue time (DVC). |
+| **Selection** | 3 yearly CV folds: 4.18% MAPE. Tuning and ensembling gained ≤ 0.06 points; an LSTM scored 5.46%. |
+| **Known weaknesses** | Under-forecasts record demand (Sep 2026 bias −4.3%: trees can't extrapolate). Weekend mornings run +1.3–1.6% high, worst on holiday weekends. Large misses follow wrong weather forecasts. |
+| **Intended use** | Portfolio demonstration of a leakage-safe forecasting system, not a dispatch or trading signal. |
 
-## Limitations and what I'd do next
+## Limitations and next steps
 
-Stated plainly, because an interviewer will find them anyway:
-
-1. **ERCOT's operational forecast is better** by 0.86 MAPE points on the 120 days compared (we win 39% of hours; July is ours). The gap is level adaptation: during record demand we under-forecast. Next: a recency-weighted or ratio-target challenger, put through the existing promotion gate with ERCOT as a second bar.
-2. **Point forecasts only.** No intervals, so no "how sure?" answer. Next: quantile LightGBM or conformal intervals, checked for coverage on the holdout.
-3. **Short live record.** The system went live on 2026-10-13. Backtest numbers are honest (archived forecasts, scored once), but they are not a track record; the dashboard shows the live numbers next to them as they accrue.
-4. **Scheduler risk, mitigated rather than eliminated.** GitHub cron lost the first two live days (2026-10-13 and 14), so the trigger moved to EventBridge, with an output check and an email alert. The runners themselves still live on GitHub.
-5. **Hour-ahead is out of scope.** Data cost, not modelling: the GridStatus free plan (250 requests a month) cannot support hourly refreshes ([FINDINGS section 8](audit/FINDINGS.md)).
-6. **Reproducibility needs credentials.** Data lives in a private DVC remote and runs in a private MLflow. The test suite (leakage, parity, gates, API, monitoring) needs neither and runs on every push.
-
-## Layout
-
-```
-src/shef/
-  sources/      GridStatus + Open-Meteo clients
-  align.py      UTC hour key for every source
-  schemas.py    Pandera gates (raw / clean / joined)
-  build.py      clean + join
-  features/     as-of views, build_features, bundle, replay, live path, LSTM sequences
-  models/       folds, metrics, targets, GBDT/LSTM builders, CV, ensemble, tracking, predict.Champion
-  serving/      FastAPI app, request schema, Supabase logging, signed client
-  monitoring/   served-weather error, calibrated drift, champion/challenger, ERCOT benchmark, load latency
-notebooks/      01 baselines · 02 GBDT · 03 LSTM · 04 ensemble/tuning/SHAP · 05 holdout + registration
-scripts/        data: backfill, build_clean, build_features, snapshot_forecast
-                serving: fetch_model, forecast_day · ops: monitor, render_dashboard, promote, ercot_benchmark
-                database: db_migrate, set_role_login, load_backtest
-infra/          bootstrap.yaml (OIDC, roles, ECR) · api.yaml (Lambda + Function URL)
-sql/            Supabase migrations
-audit/FINDINGS.md   what was measured, decided and why
-```
+1. **ERCOT is ahead by 0.86 points.** Next: a challenger that tracks the current demand level (recency weighting, ratio target, linear trees), then combining with ERCOT's forecast, which is legal at 10:00.
+2. **Point forecasts only.** Next: quantile or conformal prediction intervals.
+3. **Short live record.** The backtest is honest but is not a track record; the dashboard accumulates one.
+4. **Day-ahead only.** Hour-ahead is a data-cost decision: the free GridStatus plan (250 requests/month) can't support hourly refreshes.
 
 ## Running it
 
 ```bash
-uv sync                                    # Python 3.14
-uv run pytest                              # leakage, parity, gates, API tests
-dvc pull                                   # data (Cloudflare R2 remote)
-
-uv run --env-file .env python scripts/fetch_model.py                    # @champion -> build/model
-uv run --env-file .env python scripts/forecast_day.py --dry-run         # tomorrow, API in-process, nothing logged
+uv sync                    # Python 3.14
+uv run pytest              # leakage, parity, data gates, API, monitoring, scheduler: no credentials needed
+dvc pull                   # data (private R2 remote)
+uv run --env-file .env python scripts/forecast_day.py --dry-run   # forecast tomorrow in-process, log nothing
 ```
 
-**Deploying:**
-1. Run `infra/bootstrap.yaml` once in CloudShell.
-2. Apply `sql/` with `scripts/db_migrate.py`, and create the three role logins with `scripts/set_role_login.py` (it stores each as a GitHub secret).
-3. Run the `deploy-api` workflow (input: a model version, or `champion`).
-4. Once, in CloudShell: store a fine-grained GitHub token (this repo only, Actions read/write) as the SSM SecureString `/shef2/github-dispatch-token`, then deploy `infra/scheduler.yaml` (stack `shef2-scheduler`) and confirm the SNS email.
-5. The `daily` workflow then runs at 10:05 Central:
-   - it snapshots the weather forecast to DVC;
-   - it forecasts tomorrow through the API from that same snapshot;
-   - it backfills actual load.
+Deploying from scratch: [docs/OPERATIONS.md](docs/OPERATIONS.md#deploying).
 
-   A fallback or a missing forecast fails the run and opens an `ops-alert` issue.
+<details>
+<summary>Repository layout</summary>
+
+```
+src/shef/
+  sources/      GridStatus + Open-Meteo clients
+  features/     as-of views, build_features, bundle, replay, live path
+  models/       folds, metrics, targets, GBDT/LSTM, CV, ensemble, tracking, predict.Champion
+  serving/      FastAPI app, request schema, Supabase logging, signed client
+  monitoring/   weather error, calibrated drift, promotion, ERCOT benchmark, load latency
+notebooks/      01 baselines · 02 GBDT · 03 LSTM · 04 ensemble/tuning/SHAP · 05 holdout + registration
+scripts/        data, serving, ops and database entry points
+infra/          CloudFormation: bootstrap (OIDC, roles, ECR) · api (Lambda) · scheduler (EventBridge, SNS)
+sql/            Supabase migrations: tables, views, roles, row-level security
+audit/          FINDINGS.md: what was measured, decided and why
+```
+</details>
