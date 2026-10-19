@@ -158,6 +158,7 @@ def row() -> None:
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")   # box-drawing and ° on a Windows (cp1252) console
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("cmd", choices=["status", "numbers", "leak", "row"])
     args = p.parse_args()
