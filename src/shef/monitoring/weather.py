@@ -1,13 +1,13 @@
 """
 How good was the weather the model was actually served?
 
-For every archived gfs_seamless snapshot whose target day is old enough for
+For every archived snapshot of the served model whose target day is old enough for
 ERA5 to be final (ERA5_LAG_DAYS), compare the served temperature on the
 target-day hours with:
 
     served_vs_era5             what was observed (reanalysis)
     served_vs_previous_day1    the training proxy for that same hour
-                               (Previous Runs, gfs_seamless, forecast 24 h earlier)
+                               (Previous Runs, same model, forecast 24 h earlier)
 
 Shadow models archived in the same snapshot (SHADOW_MODELS) get the first
 comparison too, as `<model>_vs_era5`, so a candidate serving model builds a
@@ -29,19 +29,22 @@ import pandas as pd
 
 from shef.align import align_weather
 from shef.config import CENTRAL_TZ, CITIES
-from shef.serving.schema import SERVED_WEATHER_MODEL
+from shef.serving.schema import PREVIOUS_WEATHER_MODEL, SERVED_WEATHER_MODEL, served_model_for
 from shef.sources import openmeteo
 from shef.timestamps import central_day_bounds
 from shef.weather_weights import weight_cities
 
 ERA5_LAG_DAYS = 7
-SHADOW_MODELS = ["ecmwf_ifs025"]
+# Archived alongside the served model; whichever of these was not served on an issue date is scored as shadow.
+SHADOW_MODELS = [PREVIOUS_WEATHER_MODEL, SERVED_WEATHER_MODEL]
 
 
 def is_served(snapshot: pd.DataFrame) -> pd.Series:
-    """Rows of the served model. Snapshots from before the model column existed were best_match."""
+    """Rows of the model served on each row's issue date. Snapshots from before the model column
+    existed were best_match (never served)."""
     model = snapshot["model"] if "model" in snapshot else pd.Series("best_match", index=snapshot.index)
-    return model == SERVED_WEATHER_MODEL
+    served = snapshot["issue_date_central"].map(lambda d: served_model_for(date.fromisoformat(str(d))))
+    return model == served
 
 
 def served_series(snapshot: pd.DataFrame, issue_date: date, model: str | None = None) -> pd.Series:
@@ -56,10 +59,10 @@ def served_series(snapshot: pd.DataFrame, issue_date: date, model: str | None = 
     return w[(w.index >= start) & (w.index < end)]
 
 
-def reference_series(source: str, day: date) -> pd.Series:
-    """ERA5 ("archive") or the d1 proxy ("previous_runs", served model) for one Central day."""
+def reference_series(source: str, day: date, model: str | None = None) -> pd.Series:
+    """ERA5 ("archive") or the d1 proxy ("previous_runs", `model`) for one Central day."""
     start, end = central_day_bounds(day)
-    model = SERVED_WEATHER_MODEL if source == "previous_runs" else None
+    model = model if source == "previous_runs" else None
     raw = pd.concat([openmeteo.fetch(source, c, start.date(), (end + pd.Timedelta(hours=1)).date(), model=model)
                      for c in CITIES], ignore_index=True)
     if raw.empty:
@@ -92,7 +95,8 @@ def due_shadow_dates(snapshot: pd.DataFrame, model: str, done: set[tuple[date, s
     if "model" not in snapshot:
         return []
     dates = sorted({date.fromisoformat(d) for d in snapshot.loc[snapshot["model"] == model, "issue_date_central"].unique()})
-    return [d for d in dates if d + timedelta(days=1) <= today - timedelta(days=ERA5_LAG_DAYS)
+    return [d for d in dates if served_model_for(d) != model
+            and d + timedelta(days=1) <= today - timedelta(days=ERA5_LAG_DAYS)
             and (d, f"{model}_vs_era5") not in done]
 
 
@@ -104,7 +108,8 @@ def check(snapshot: pd.DataFrame, done: set[tuple[date, str]], today: date | Non
         for comparison, source in (("served_vs_era5", "archive"), ("served_vs_previous_day1", "previous_runs")):
             if (d, comparison) in done:
                 continue
-            if (r := compare(served, reference_series(source, d + timedelta(days=1)))) is not None:
+            ref = reference_series(source, d + timedelta(days=1), served_model_for(d))
+            if (r := compare(served, ref)) is not None:
                 out.append({"issue_date": d, "comparison": comparison, "variable": "temp_c", **r})
     for model in SHADOW_MODELS:
         for d in due_shadow_dates(snapshot, model, done, today):

@@ -23,7 +23,18 @@ from shef.config import CENTRAL_TZ, contract
 from shef.features import BUNDLE_FEATURES
 from shef.timestamps import central_day_hours, issue_time_utc
 
-SERVED_WEATHER_MODEL = "gfs_seamless"
+# Open-Meteo model served at issue time. The model trains on ERA5, so this is a serving choice, not
+# part of the fitted model. Until 2026-10-28 it was gfs_seamless, which at our 25-38 h leads is HRRR
+# live but GFS global in the Previous Runs archive the backtest used (FINDINGS 13). ECMWF IFS 0.25 is
+# one model at every lead: day-1 temp MAE 0.84 vs 1.37 C, backtest MAPE 3.54 -> 3.34 (P9 C9a).
+SERVED_WEATHER_MODEL = "ecmwf_ifs025"
+SERVED_SINCE = date(2026, 10, 29)          # first issue date served with it
+PREVIOUS_WEATHER_MODEL = "gfs_seamless"
+
+
+def served_model_for(issue_date: date) -> str:
+    """The weather model that was served for a Central issue date."""
+    return SERVED_WEATHER_MODEL if issue_date >= SERVED_SINCE else PREVIOUS_WEATHER_MODEL
 LOAD_MIN_MW, LOAD_MAX_MW = 2000.0, 30000.0   # same bounds as the clean-layer gate (schemas.py)
 TEMP = (-30.0, 55.0)
 LOAD = (LOAD_MIN_MW, LOAD_MAX_MW)
@@ -64,7 +75,7 @@ def build_request_model(features: list[str]) -> type[BaseModel]:
         model_config = ConfigDict(extra="forbid")
 
         issue_time_utc: AwareDatetime
-        weather_model: Literal["gfs_seamless"]  # what the training proxy matches (P3 E10)
+        weather_model: Literal[SERVED_WEATHER_MODEL]  # type: ignore[valid-type]
         rows: list[row] = Field(min_length=1)  # type: ignore[valid-type]
 
         @model_validator(mode="after")

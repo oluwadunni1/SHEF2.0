@@ -343,7 +343,7 @@ function render() {
     ["Serving", m ? `${m.model_name} v${m.model_version}` : "shef2-day-ahead v1"],
     ["Algorithm", "LightGBM on a trend-residual target, 42 point-in-time features"],
     ["MLflow run", m && m.mlflow_run_id ? m.mlflow_run_id.slice(0, 12) : "—"],
-    ["Weather input", "Open-Meteo gfs_seamless, archived at issue time"],
+    ["Weather input", "Open-Meteo ecmwf_ifs025 from 29 Oct 2026 (gfs_seamless before), archived at issue time"],
     ["Backtest (holdout)", back ? `MAPE ${pct(back.mape)} · Peak ${pct(back.peak_mape)} · RMSE ${fmt(back.rmse, 0)} MW · ${back.n_days} days` : "—"],
     ["Baseline on holdout", "MAPE 7.62% · RMSE 1,013 MW (freshest legal same-hour load)"]]);
 

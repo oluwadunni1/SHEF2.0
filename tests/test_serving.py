@@ -14,7 +14,7 @@ from shef.serving.app import BASELINE_NAME, create_app
 from tests.test_features import synthetic_joined
 
 META = {"model_name": "shef2-day-ahead", "model_version": "7", "mlflow_run_id": "abc",
-        "trained_through": "2025-07-31", "weather_model": "gfs_seamless"}
+        "trained_through": "2025-07-31", "weather_model": schema.SERVED_WEATHER_MODEL}
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +93,7 @@ def test_forecast_equals_champion_and_logs_every_hour(api, day):
     np.testing.assert_allclose([p["load_mw"] for p in out["predictions"]], champ.predict(rows), atol=0.05)
     rec = logged[0]
     assert set(rec["features"]) == set(champ.features)          # the exact model inputs, bundle applied
-    assert rec["lead_hours"] == 14 and rec["weather_model"] == "gfs_seamless" and rec["mlflow_run_id"] == "abc"
+    assert rec["lead_hours"] == 14 and rec["weather_model"] == schema.SERVED_WEATHER_MODEL and rec["mlflow_run_id"] == "abc"
     assert pd.Timestamp(rec["issue_time_utc"]) == rows["issue_time_utc"].iloc[0]
     assert len(out["predictions"]) == (25 if day.month == 11 else 24)
 
@@ -119,6 +119,7 @@ def mutate(body, f):
     ("missing hour", lambda b: b["rows"].pop(5)),
     ("not 10:00 Central", lambda b: b.update(issue_time_utc="2025-08-04T16:00:00+00:00")),
     ("wrong weather model", lambda b: b.update(weather_model="best_match")),
+    ("superseded weather model", lambda b: b.update(weather_model="gfs_seamless")),
     ("temperature in Fahrenheit", lambda b: b["rows"][0].update(temp_c=95.0)),
     ("load in kW", lambda b: b["rows"][0].update(load_lag_168=9_000_000.0)),
     ("naive timestamp", lambda b: b["rows"][0].update(ts_utc="2025-08-05T05:00:00")),

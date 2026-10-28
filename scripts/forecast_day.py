@@ -2,7 +2,7 @@
 forecast_day.py — the day-ahead client: fetch what is known at issue time,
 build the feature rows, ask the API for the forecast, report realised load.
 
-    1. GridStatus load for the last 10 days + Open-Meteo gfs_seamless (4 cities),
+    1. GridStatus load for the last 10 days + Open-Meteo SERVED_WEATHER_MODEL (4 cities),
        fetched now or (--from-snapshot, the daily job) read from today's archived snapshot
     2. features.live.build_live(issue_time, target_day, ...)   (parity-tested vs replay)
     3. POST /forecast                                          (API predicts + logs)
@@ -84,7 +84,7 @@ def main() -> int:
     p.add_argument("--dry-run", action="store_true", help="validate + predict in-process; log nothing")
     p.add_argument("--model-dir", type=Path, default=Path("build/model"), help="for --dry-run")
     p.add_argument("--from-snapshot", action="store_true",
-                   help="use the archived gfs_seamless snapshot for this issue date instead of fetching")
+                   help="use the archived snapshot of the served weather model for this issue date instead of fetching")
     args = p.parse_args()
 
     now = pd.Timestamp.now(tz="UTC")

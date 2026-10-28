@@ -13,6 +13,7 @@ from pathlib import Path
 from shef.config import ROOT
 from shef.models import tracking
 from shef.models.predict import Champion
+from shef.serving.schema import SERVED_WEATHER_MODEL
 
 NAME = "shef2-day-ahead"
 ALIAS = "champion"
@@ -37,7 +38,7 @@ def fetch(ref: str, out: Path) -> dict:
         shutil.copytree(src, out / "champion")
     meta = {"model_name": NAME, "model_version": str(mv.version), "mlflow_run_id": mv.run_id,
             "trained_through": run.data.params.get("train_end"),
-            "weather_model": run.data.tags.get("weather_model_for_serving", "gfs_seamless")}
+            "weather_model": SERVED_WEATHER_MODEL}   # a serving choice: the model trains on ERA5
     (out / "model_meta.json").write_text(json.dumps(meta, indent=2))
     return meta
 
@@ -51,7 +52,7 @@ def register(champion: Champion, run_name: str, params: dict, metrics: dict, tag
     with tempfile.TemporaryDirectory() as tmp:
         art = champion.save(Path(tmp) / "champion")
         with mlflow.start_run(run_name=run_name) as run:
-            mlflow.set_tags({**tracking.provenance(), "weather_model_for_serving": "gfs_seamless", **tags})
+            mlflow.set_tags({**tracking.provenance(), "weather_model_for_serving": SERVED_WEATHER_MODEL, **tags})
             mlflow.log_params(params)
             mlflow.log_metrics({k: v for k, v in metrics.items() if v is not None})
             for name, d in (dicts or {}).items():

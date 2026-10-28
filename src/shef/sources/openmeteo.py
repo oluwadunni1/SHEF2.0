@@ -106,8 +106,7 @@ def fetch(source: str, city: str, start: date, end: date, cache_dirs: list[Path]
 
 def fetch_live_forecast(city: str, past_days: int = 3, forecast_days: int = 3, model: str | None = None) -> pd.DataFrame:
     """The forecast we would serve right now: latest run of `model` (Open-Meteo's
-    best_match blend when None). Serving uses gfs_seamless, the model the
-    training proxy matches (P3 E10)."""
+    best_match blend when None). Serving uses SERVED_WEATHER_MODEL (serving/schema.py)."""
     coords = CITY_COORDS[city]
     params = {
         "latitude": coords["lat"],

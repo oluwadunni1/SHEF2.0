@@ -4,10 +4,10 @@ serve it at issue time. The Previous Runs API is only a proxy for this; over
 time this archive is what proves (or disproves) that the proxy matches serving.
 
 Three models per snapshot:
-    gfs_seamless  what serving requests (matches the training proxy, P3 E10)
+    ecmwf_ifs025  what serving requests (SERVED_WEATHER_MODEL, from issue date 2026-10-29)
     best_match    Open-Meteo's default blend, kept for comparison
-    ecmwf_ifs025  shadow candidate (P9 C9): day-1 temperature MAE 0.84 vs GFS 1.37 C in
-                  the Previous Runs archive; archived so its 10:00 CT version is scored live
+    gfs_seamless  served until 2026-10-28; kept as a shadow so the two keep being compared.
+                  Live it is HRRR at our 25-38 h leads, which the GFS-global backtest never saw.
 
 Stores raw API labels in data/raw/weather_fc_live, keyed by Central issue date,
 model, valid time and city, plus past_days of recent hours (the "observed" side
@@ -18,7 +18,7 @@ of windows that straddle issue_time is not in ERA5 yet at serve time).
     uv run python scripts/snapshot_forecast.py --dry-run       # fetch + validate, store nothing
 
 Run by .github/workflows/daily.yml at 10:xx Central, just before the forecast,
-which then reads the gfs_seamless rows back (forecast_day.py --from-snapshot).
+which then reads the served model's rows back (forecast_day.py --from-snapshot).
 """
 from __future__ import annotations
 
@@ -29,11 +29,12 @@ import pandas as pd
 
 from shef import schemas, store
 from shef.config import CENTRAL_TZ, CITIES, contract
+from shef.serving.schema import SERVED_WEATHER_MODEL
 from shef.sources import openmeteo
 from shef.validate import gate
 
-MODELS = ["gfs_seamless", None]   # None = best_match
-SHADOW_MODELS = ["ecmwf_ifs025"]   # best effort: a failure here never blocks the forecast
+MODELS = [SERVED_WEATHER_MODEL, None]   # None = best_match
+SHADOW_MODELS = ["gfs_seamless"]   # best effort: a failure here never blocks the forecast
 KEYS = ["issue_date_central", "model", "time", "city"]
 
 

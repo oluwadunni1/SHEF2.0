@@ -1,5 +1,5 @@
 # The daily day-ahead loop, at 10:00 America/Chicago:
-#   1. snapshot the Open-Meteo forecast (gfs_seamless served + best_match) -> DVC/R2
+#   1. snapshot the Open-Meteo forecast (ecmwf_ifs025 served, best_match, gfs_seamless shadow) -> DVC/R2
 #   2. forecast tomorrow from THAT snapshot through the deployed API -> Supabase
 #   3. send realised load so yesterday's rows get actual_load_mw
 #   4. monitoring: served-weather error vs ERA5 / training proxy, input drift,

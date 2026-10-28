@@ -74,6 +74,17 @@ def test_shadow_model_is_scored_separately_and_never_served():
     assert weather.due_shadow_dates(snapshot_rows("2026-10-13"), "ecmwf_ifs025", set(), date(2026, 10, 22)) == []
 
 
+def test_served_model_switches_on_its_start_date():
+    from shef.serving.schema import SERVED_SINCE, served_model_for
+    before, after = SERVED_SINCE - pd.Timedelta(days=1).to_pytimedelta(), SERVED_SINCE
+    assert served_model_for(before) == "gfs_seamless" and served_model_for(after) == "ecmwf_ifs025"
+    snap = pd.concat([snapshot_rows(str(after), temp=20.0), snapshot_rows(str(after), temp=25.0, model="ecmwf_ifs025")])
+    assert (weather.served_series(snap, after) == 25.0).all()                       # ECMWF is served from then on
+    today = after + pd.Timedelta(days=10).to_pytimedelta()
+    assert weather.due_shadow_dates(snap, "gfs_seamless", set(), today) == [after]  # and GFS becomes the shadow
+    assert weather.due_shadow_dates(snap, "ecmwf_ifs025", set(), today) == []
+
+
 @pytest.mark.skipif(not os.environ.get("DASHBOARD_DATABASE_URL"), reason="needs the monitoring database")
 def test_sql_summary_matches_metrics_py():
     import psycopg
