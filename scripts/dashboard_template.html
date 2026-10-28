@@ -113,6 +113,19 @@ footer a { color: var(--ink-2); }
     </div>
   </section>
 
+  <section class="grid">
+    <div class="card">
+      <h2>Shadow challengers</h2>
+      <div class="sub">Frozen rules applied to the champion's forecast at issue time, logged daily, never served.
+        <b>recent_median</b>: the forecast minus half the median error of the last 7 days that were known by 09:00 CT.
+        <b>stack_ercot</b>: 0.31 × ours + 0.70 × ERCOT's 09:30 forecast (ours alone where ERCOT is missing).
+        Both were fixed on 28 Oct 2026. <b>Record</b> counts only rows logged before their target day, from 29 Oct, and is what
+        the promotion rule judges after 28 days: ≥ 0.10 MAPE points better than the champion, with Peak-MAPE no worse.
+        <b>Incl. replay</b> adds earlier live days recomputed afterwards with the same point-in-time rule.</div>
+      <div id="challengers"></div>
+    </div>
+  </section>
+
   <section class="grid two">
     <div class="card">
       <h2>Weather forecast the model was served</h2>
@@ -295,6 +308,22 @@ function render() {
       [`${r.kind}: ours`, r.n_days, pct(r.ours_mape), pct(r.ours_peak_mape), fmt(r.ours_rmse, 0), pct(r.ours_bias_pct), pct(r.ours_wins_pct, 0)],
       [`${r.kind}: ERCOT`, r.n_days, pct(r.ercot_mape), pct(r.ercot_peak_mape), fmt(r.ercot_rmse, 0), pct(r.ercot_bias_pct), ""]]));
   } else { empty(B, "ERCOT's forecasts are being loaded."); empty(BT, "—"); }
+
+  // Shadow challengers.
+  const CH = document.getElementById("challengers");
+  const verdict = r => {
+    if (r.scope !== "record") return "replay: not counted";
+    if (r.n_days < 28) return `collecting: ${r.n_days}/28 days`;
+    const ok = r.challenger_mape <= r.champion_mape - 0.10 && r.challenger_peak_mape <= r.champion_peak_mape;
+    return ok ? "passes the rule" : "fails the rule";
+  };
+  const signed = v => v == null ? "—" : (v > 0 ? "+" : "") + fmt(v, 2);
+  if (D.challengers && D.challengers.length) table(CH,
+    ["Challenger", "Scope", "Days", "Champion MAPE", "Challenger MAPE", "Δ points", "Champion Peak", "Challenger Peak", "Status"],
+    D.challengers.map(r => [r.challenger, r.scope === "record" ? "Record" : "Incl. replay", r.n_days,
+      pct(r.champion_mape), pct(r.challenger_mape), signed(r.challenger_mape - r.champion_mape),
+      pct(r.champion_peak_mape), pct(r.challenger_peak_mape), verdict(r)]));
+  else empty(CH, "First rows are logged with the next daily forecast; the record starts with target day 29 Oct 2026.");
 
   // Weather.
   const W = document.getElementById("weather");
