@@ -3,9 +3,11 @@ snapshot_forecast.py — archive the Open-Meteo forecast exactly as we would
 serve it at issue time. The Previous Runs API is only a proxy for this; over
 time this archive is what proves (or disproves) that the proxy matches serving.
 
-Two models per snapshot:
+Three models per snapshot:
     gfs_seamless  what serving requests (matches the training proxy, P3 E10)
     best_match    Open-Meteo's default blend, kept for comparison
+    ecmwf_ifs025  shadow candidate (P9 C9): day-1 temperature MAE 0.84 vs GFS 1.37 C in
+                  the Previous Runs archive; archived so its 10:00 CT version is scored live
 
 Stores raw API labels in data/raw/weather_fc_live, keyed by Central issue date,
 model, valid time and city, plus past_days of recent hours (the "observed" side
@@ -31,6 +33,7 @@ from shef.sources import openmeteo
 from shef.validate import gate
 
 MODELS = ["gfs_seamless", None]   # None = best_match
+SHADOW_MODELS = ["ecmwf_ifs025"]   # best effort: a failure here never blocks the forecast
 KEYS = ["issue_date_central", "model", "time", "city"]
 
 
@@ -56,6 +59,13 @@ def main() -> None:
         return
 
     df = pd.concat([openmeteo.fetch_live_forecast(c, model=m) for m in MODELS for c in CITIES], ignore_index=True)
+    for m in SHADOW_MODELS:
+        try:
+            shadow = pd.concat([openmeteo.fetch_live_forecast(c, model=m) for c in CITIES], ignore_index=True)
+            gate(shadow, _schema(), f"raw_weather_fc_live_{m}")
+            df = pd.concat([df, shadow], ignore_index=True)
+        except Exception as e:
+            print(f"::warning::shadow model {m} not archived: {type(e).__name__}: {str(e)[:300]}")
     gate(df, _schema(), "raw_weather_fc_live")
     df["run_fetched_at_utc"] = now
     df["issue_date_central"] = str(local.date())
@@ -70,7 +80,7 @@ def main() -> None:
 
 
 def _schema():
-    """RawWeather, but unique per (time, city, model): two models per snapshot."""
+    """RawWeather, but unique per (time, city, model): several models per snapshot."""
     import pandera.pandas as pa
 
     return pa.DataFrameSchema({**schemas.RawWeather.columns, "model": pa.Column(str)},

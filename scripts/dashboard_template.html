@@ -328,7 +328,7 @@ function render() {
   // Weather.
   const W = document.getElementById("weather");
   if (D.weather.length) table(W, ["Issue date", "Comparison", "MAE °C", "Bias °C", "p95 |err| °C", "Hours"],
-    D.weather.map(r => [r.issue_date, r.comparison === "served_vs_era5" ? "vs ERA5" : "vs training proxy", fmt(r.mae, 2), (r.bias > 0 ? "+" : "") + fmt(r.bias, 2), fmt(r.p95_abs, 2), r.n_hours]));
+    D.weather.map(r => [r.issue_date, ({served_vs_era5: "vs ERA5", served_vs_previous_day1: "vs training proxy"})[r.comparison] || r.comparison.replace("_vs_era5", " (shadow) vs ERA5"), fmt(r.mae, 2), (r.bias > 0 ? "+" : "") + fmt(r.bias, 2), fmt(r.p95_abs, 2), r.n_hours]));
   else empty(W, "Scored once ERA5 is final for the target day (about a week after each forecast). Backtest reference: day-1 MAE 1.32 °C.");
 
   // Drift.

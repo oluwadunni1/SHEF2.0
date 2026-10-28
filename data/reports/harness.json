@@ -166,5 +166,29 @@
     "verdict": "fails",
     "reason": "rolling gain +0.03 below the 0.10 margin. rolling MAPE 3.54 -> 3.50 (+0.03), peak 2.54 -> 2.43; cv MAPE 4.18 -> 4.20",
     "mlflow_run_id": "09014dc64abd48dba993bc34ba5eb070"
+  },
+  {
+    "name": "C9a_ecmwf_weather",
+    "signature": "weather:ecmwf_ifs025",
+    "hypothesis": "Same model, served forecast weather from ECMWF IFS 0.25 instead of GFS (day-1 temp MAE 0.84 vs 1.37 C). The model trains on ERA5, so only the serving input changes.",
+    "run_at": "2026-10-28T15:08+00:00",
+    "git_commit": "4526093",
+    "cv": {
+      "note": "fold 3 only (ECMWF archive starts 2024-03)",
+      "fold3_mape_gfs": 4.186,
+      "fold3_mape": 3.995,
+      "fold3_peak_gfs": 3.363,
+      "fold3_peak": 3.468
+    },
+    "rolling": {
+      "mape": 3.338,
+      "peak_mape": 2.297,
+      "rmse": 457.0,
+      "bias_pct": 0.27
+    },
+    "rolling_2026_09_mape": 2.57,
+    "verdict": "passes",
+    "reason": "rolling MAPE 3.54 -> 3.34 (+0.20), peak 2.54 -> 2.30 on identical 10,224 hours; better on 60% of 426 days, gain 95% CI [0.03, 0.37]; fold 3 MAPE 4.19 -> 4.00 but peak 3.36 -> 3.47. Proxy (Previous Runs day-1) only: confirm the 10:00 CT archive before switching.",
+    "mlflow_run_id": null
   }
 ]

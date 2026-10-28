@@ -9,6 +9,10 @@ target-day hours with:
     served_vs_previous_day1    the training proxy for that same hour
                                (Previous Runs, gfs_seamless, forecast 24 h earlier)
 
+Shadow models archived in the same snapshot (SHADOW_MODELS) get the first
+comparison too, as `<model>_vs_era5`, so a candidate serving model builds a
+live record before anything switches.
+
 The second comparison is why the snapshot archive exists: training used the
 proxy because live forecasts were never archived. If the two differ, the
 backtest overstated (or understated) live accuracy.
@@ -31,6 +35,7 @@ from shef.timestamps import central_day_bounds
 from shef.weather_weights import weight_cities
 
 ERA5_LAG_DAYS = 7
+SHADOW_MODELS = ["ecmwf_ifs025"]
 
 
 def is_served(snapshot: pd.DataFrame) -> pd.Series:
@@ -39,9 +44,11 @@ def is_served(snapshot: pd.DataFrame) -> pd.Series:
     return model == SERVED_WEATHER_MODEL
 
 
-def served_series(snapshot: pd.DataFrame, issue_date: date) -> pd.Series:
-    """Weighted served temperature on the target day of one issue date, indexed by ts_utc."""
-    snap = snapshot[(snapshot["issue_date_central"] == str(issue_date)) & is_served(snapshot)]
+def served_series(snapshot: pd.DataFrame, issue_date: date, model: str | None = None) -> pd.Series:
+    """Weighted forecast temperature on the target day of one issue date, indexed by ts_utc:
+    the served model's, or another archived model's."""
+    rows = is_served(snapshot) if model is None else (snapshot["model"] == model if "model" in snapshot else False)
+    snap = snapshot[(snapshot["issue_date_central"] == str(issue_date)) & rows]
     if snap.empty:
         return pd.Series(dtype=float)
     w = weight_cities(align_weather(snap, "forecast"), ["temp_c"]).set_index("ts_utc")["temp_c"]
@@ -81,6 +88,14 @@ def due_issue_dates(snapshot: pd.DataFrame, done: set[tuple[date, str]], today: 
             and not need <= {c for (dd, c) in done if dd == d}]
 
 
+def due_shadow_dates(snapshot: pd.DataFrame, model: str, done: set[tuple[date, str]], today: date) -> list[date]:
+    if "model" not in snapshot:
+        return []
+    dates = sorted({date.fromisoformat(d) for d in snapshot.loc[snapshot["model"] == model, "issue_date_central"].unique()})
+    return [d for d in dates if d + timedelta(days=1) <= today - timedelta(days=ERA5_LAG_DAYS)
+            and (d, f"{model}_vs_era5") not in done]
+
+
 def check(snapshot: pd.DataFrame, done: set[tuple[date, str]], today: date | None = None) -> list[dict]:
     today = today or pd.Timestamp.now(tz=CENTRAL_TZ).date()
     out = []
@@ -91,4 +106,9 @@ def check(snapshot: pd.DataFrame, done: set[tuple[date, str]], today: date | Non
                 continue
             if (r := compare(served, reference_series(source, d + timedelta(days=1)))) is not None:
                 out.append({"issue_date": d, "comparison": comparison, "variable": "temp_c", **r})
+    for model in SHADOW_MODELS:
+        for d in due_shadow_dates(snapshot, model, done, today):
+            fc = served_series(snapshot, d, model)
+            if not fc.empty and (r := compare(fc, reference_series("archive", d + timedelta(days=1)))) is not None:
+                out.append({"issue_date": d, "comparison": f"{model}_vs_era5", "variable": "temp_c", **r})
     return out

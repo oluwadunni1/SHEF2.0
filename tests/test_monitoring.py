@@ -64,6 +64,16 @@ def test_only_era5_final_days_are_due():
     assert weather.due_issue_dates(snap, done, today=date(2026, 10, 22)) == []
 
 
+def test_shadow_model_is_scored_separately_and_never_served():
+    snap = pd.concat([snapshot_rows("2026-10-13", temp=20.0), snapshot_rows("2026-10-13", temp=25.0, model="ecmwf_ifs025")])
+    assert (weather.served_series(snap, date(2026, 10, 13)) == 20.0).all()            # serving still sees GFS
+    assert (weather.served_series(snap, date(2026, 10, 13), "ecmwf_ifs025") == 25.0).all()
+    assert weather.due_shadow_dates(snap, "ecmwf_ifs025", set(), today=date(2026, 10, 22)) == [date(2026, 10, 13)]
+    assert weather.due_shadow_dates(snap, "ecmwf_ifs025", {(date(2026, 10, 13), "ecmwf_ifs025_vs_era5")},
+                                    today=date(2026, 10, 22)) == []
+    assert weather.due_shadow_dates(snapshot_rows("2026-10-13"), "ecmwf_ifs025", set(), date(2026, 10, 22)) == []
+
+
 @pytest.mark.skipif(not os.environ.get("DASHBOARD_DATABASE_URL"), reason="needs the monitoring database")
 def test_sql_summary_matches_metrics_py():
     import psycopg
