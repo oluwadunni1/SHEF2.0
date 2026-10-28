@@ -1,0 +1,170 @@
+[
+  {
+    "name": "baseline",
+    "signature": "b91cccce84eb",
+    "hypothesis": "The champion recipe: LightGBM, trend target, 42 features, obs training rows.",
+    "run_at": "2026-10-28T13:03+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.185,
+      "peak_mape": 2.991,
+      "rmse": 506.575,
+      "bias_pct": 0.758
+    },
+    "rolling": {
+      "mape": 3.536,
+      "peak_mape": 2.543,
+      "rmse": 473.144,
+      "bias_pct": 0.543
+    },
+    "rolling_2026_09_mape": 3.13,
+    "verdict": "reference",
+    "reason": "the champion recipe",
+    "mlflow_run_id": "55280bd911fc441f8c3989a5bbe48cc4"
+  },
+  {
+    "name": "A2_delta",
+    "signature": "6fcb1e791be9",
+    "hypothesis": "Predicting the change from the freshest legal same-hour load takes the level from data rather than a linear trend line, so record-demand months are not under-forecast.",
+    "run_at": "2026-10-28T13:14+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.512,
+      "peak_mape": 3.508,
+      "rmse": 546.323,
+      "bias_pct": -1.018
+    },
+    "rolling": {
+      "mape": 3.812,
+      "peak_mape": 2.847,
+      "rmse": 510.77,
+      "bias_pct": -0.172
+    },
+    "rolling_2026_09_mape": 3.104,
+    "verdict": "fails",
+    "reason": "rolling Peak-MAPE worse. rolling MAPE 3.54 -> 3.81 (-0.28), peak 2.54 -> 2.85; cv MAPE 4.18 -> 4.51",
+    "mlflow_run_id": "87923c0a3ea548d39aeaaf5e583cddbf"
+  },
+  {
+    "name": "A3_linear_tree",
+    "signature": "ea3f8ec40317",
+    "hypothesis": "Linear leaves extrapolate the temperature response past training peaks.",
+    "run_at": "2026-10-28T13:22+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.338,
+      "peak_mape": 3.287,
+      "rmse": 528.751,
+      "bias_pct": 0.398
+    },
+    "rolling": {
+      "mape": 3.548,
+      "peak_mape": 2.657,
+      "rmse": 477.327,
+      "bias_pct": 0.298
+    },
+    "rolling_2026_09_mape": 2.888,
+    "verdict": "fails",
+    "reason": "rolling Peak-MAPE worse. rolling MAPE 3.54 -> 3.55 (-0.01), peak 2.54 -> 2.66; cv MAPE 4.18 -> 4.34",
+    "mlflow_run_id": "cad634591a9c4d56b56af22c831387b4"
+  },
+  {
+    "name": "A4_recency_2y",
+    "signature": "04fe692291d6",
+    "hypothesis": "Recent behaviour (AC stock, growth) should outweigh 2016: half-life 2 years.",
+    "run_at": "2026-10-28T13:26+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.233,
+      "peak_mape": 2.97,
+      "rmse": 512.43,
+      "bias_pct": 0.726
+    },
+    "rolling": {
+      "mape": 3.585,
+      "peak_mape": 2.507,
+      "rmse": 475.484,
+      "bias_pct": 0.435
+    },
+    "rolling_2026_09_mape": 3.052,
+    "verdict": "fails",
+    "reason": "rolling gain -0.05 below the 0.10 margin. rolling MAPE 3.54 -> 3.58 (-0.05), peak 2.54 -> 2.51; cv MAPE 4.18 -> 4.23",
+    "mlflow_run_id": "6baee5e6d8034c9bb100f02e84241358"
+  },
+  {
+    "name": "B5_inverse_load",
+    "signature": "18b0018c0dc6",
+    "hypothesis": "L2 on MW optimises RMSE; weighting by 1/load moves the fit toward MAPE.",
+    "run_at": "2026-10-28T13:30+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.265,
+      "peak_mape": 3.019,
+      "rmse": 511.735,
+      "bias_pct": 0.536
+    },
+    "rolling": {
+      "mape": 3.513,
+      "peak_mape": 2.495,
+      "rmse": 467.375,
+      "bias_pct": 0.393
+    },
+    "rolling_2026_09_mape": 2.949,
+    "verdict": "fails",
+    "reason": "rolling gain +0.02 below the 0.10 margin. rolling MAPE 3.54 -> 3.51 (+0.02), peak 2.54 -> 2.50; cv MAPE 4.18 -> 4.27",
+    "mlflow_run_id": "b29e7978dd254a6ca0e8c177d84269d7"
+  },
+  {
+    "name": "B6_peak_x2",
+    "signature": "95b01fc082a9",
+    "hypothesis": "Peak-MAPE is the weak spot: double weight on the top-decile load hours.",
+    "run_at": "2026-10-28T13:34+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.256,
+      "peak_mape": 3.003,
+      "rmse": 513.732,
+      "bias_pct": 0.795
+    },
+    "rolling": {
+      "mape": 3.562,
+      "peak_mape": 2.427,
+      "rmse": 470.466,
+      "bias_pct": 0.407
+    },
+    "rolling_2026_09_mape": 3.067,
+    "verdict": "fails",
+    "reason": "rolling gain -0.03 below the 0.10 margin. rolling MAPE 3.54 -> 3.56 (-0.03), peak 2.54 -> 2.43; cv MAPE 4.18 -> 4.26",
+    "mlflow_run_id": "6d6ffec470794948b8231933dcb26d81"
+  },
+  {
+    "name": "D12_wow_ratio",
+    "signature": "b31c54d31642",
+    "hypothesis": "Week-over-week growth of the freshest load is a cheap level signal.",
+    "run_at": "2026-10-28T13:38+00:00",
+    "git_commit": "4707ba3",
+    "data": "147a8093-fd1a3a41",
+    "cv": {
+      "mape": 4.2,
+      "peak_mape": 2.938,
+      "rmse": 504.403,
+      "bias_pct": 0.677
+    },
+    "rolling": {
+      "mape": 3.501,
+      "peak_mape": 2.426,
+      "rmse": 469.497,
+      "bias_pct": 0.436
+    },
+    "rolling_2026_09_mape": 3.218,
+    "verdict": "fails",
+    "reason": "rolling gain +0.03 below the 0.10 margin. rolling MAPE 3.54 -> 3.50 (+0.03), peak 2.54 -> 2.43; cv MAPE 4.18 -> 4.20",
+    "mlflow_run_id": "09014dc64abd48dba993bc34ba5eb070"
+  }
+]
