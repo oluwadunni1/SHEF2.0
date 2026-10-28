@@ -18,10 +18,22 @@ It is built around one rule, enforced by tests rather than convention, so the ba
 | Baseline: freshest legal same-hour load | 7.62% | 3.79% | 1,013 MW |
 | **SHEF: LightGBM on a trend-residual target** | **3.79%** | **3.38%** | **482 MW** |
 | ERCOT's own forecast, 120 matched days (Jun–Oct 2026) | 2.79% | 2.52% | 437 MW |
+| **Live, 15–27 Oct 2026 (13 days, 312 hours)** | **3.22%** | **2.48%** | **397 MW** |
+| ERCOT on the same live hours | 2.39% | 1.18% | 300 MW |
 
 - Scored on **archived weather forecasts**, not observed weather, after selection on three yearly CV folds.
-- ERCOT's operator forecast is better overall (ours: 3.65% on the same hours). The gap is under-forecasting while demand set records; in July SHEF was ahead. See [FINDINGS §9](audit/FINDINGS.md).
-- Live since 14 Oct 2026; live accuracy next to the backtest is on the [dashboard](https://oluwadunni1.github.io/SHEF2.0/).
+- ERCOT's operator forecast is better, in the backtest and live. Live, two days with wrong weather forecasts (24 and 27 Oct, 6.75% and 7.33%) account for most of the gap. See [FINDINGS §12–13](audit/FINDINGS.md).
+- Live accuracy, updated daily, is on the [dashboard](https://oluwadunni1.github.io/SHEF2.0/). Thirteen days is a small sample.
+
+**What moved accuracy since launch** (monthly rolling backtest, Aug 2025 → Oct 2026, [FINDINGS §12](audit/FINDINGS.md)):
+
+| | MAPE | Peak-MAPE |
+|---|---|---|
+| Champion trained once (the holdout above) | 3.79% | 3.38% |
+| Same recipe, retrained monthly | 3.54% | 2.54% |
+| **+ ECMWF forecast weather instead of GFS** | **3.34%** | **2.30%** |
+
+Six model changes (new targets, linear leaves, sample weights, new features) failed to beat the monthly-retrained baseline. Better weather input did.
 
 ## Why a v2
 
@@ -57,6 +69,8 @@ flowchart LR
 - **Fails safe.** If forecast temperature is missing for any hour, the API serves a flagged baseline instead of a silent bad prediction, and the run opens an alert.
 - **No long-lived keys, least privilege.** GitHub assumes AWS roles via OIDC; the API URL accepts only signed requests; each component logs into Postgres as its own role, and each role was probed for what it can't do.
 - **A real incident, fixed.** GitHub cron silently dropped the first live days while every run was green. The clock moved to EventBridge, and a 13:00 check asks the API whether tomorrow's forecast exists, alerting by email if not. ([FINDINGS §11](audit/FINDINGS.md))
+- **A serving/backtest mismatch, found by archiving what was served.** Open-Meteo's `gfs_seamless` is HRRR at our 25–38 h leads live, but GFS global in the archive the backtest used. Two 7% days traced to HRRR forecasts 5–6 °C too cold; the same model on ECMWF weather scores about 1.9% on both. ECMWF is now served, and GFS is kept as a scored shadow. ([FINDINGS §13](audit/FINDINGS.md))
+- **Challengers earn a live record before promotion.** An ERCOT stack (0.31 × ours + 0.70 × ERCOT) and a recent-error correction are frozen and logged daily next to the champion, never served; the dashboard tracks them toward a 28-day verdict.
 
 Details: [operations](docs/OPERATIONS.md) · [monitoring and promotion](docs/MONITORING.md) · [every measurement and decision](audit/FINDINGS.md).
 
@@ -67,14 +81,14 @@ Details: [operations](docs/OPERATIONS.md) · [monitoring and promotion](docs/MON
 | **Model** | `shef2-day-ahead` v1 (`@champion`): LightGBM, default parameters, trend-residual target, 42 point-in-time features. MLflow pyfunc with the forecast gate and feature bundle inside. |
 | **Predicts** | Hourly load (MW), ERCOT South Central, all 23–25 hours of the next Central day, issued 10:00 Central (lead 14–38 h). |
 | **Data** | GridStatus `ercot_load_by_weather_zone`; ERA5 weather for 4 population-weighted cities; 2016 → Oct 2026, Winter Storm Uri load-shed days excluded. |
-| **Inference weather** | Open-Meteo `gfs_seamless` forecast, archived at issue time (DVC). |
+| **Inference weather** | Open-Meteo `ecmwf_ifs025` forecast from 29 Oct 2026 (`gfs_seamless` before), archived at issue time (DVC), with `gfs_seamless` archived alongside as a shadow. |
 | **Selection** | 3 yearly CV folds: 4.18% MAPE. Tuning and ensembling gained ≤ 0.06 points; an LSTM scored 5.46%. |
-| **Known weaknesses** | Under-forecasts record demand (Sep 2026 bias −4.3%: trees can't extrapolate). Weekend mornings run +1.3–1.6% high, worst on holiday weekends. Large misses follow wrong weather forecasts. |
+| **Known weaknesses** | Large misses follow wrong weather forecasts: the model is only as good as tomorrow's temperature. Without retraining it falls behind record demand (Sep 2026 bias −4.3% on a 14-month-old model; monthly retraining fixes most of it). Weekend mornings run +1.3–1.6% high, worst on holiday weekends. |
 | **Intended use** | Portfolio demonstration of a leakage-safe forecasting system, not a dispatch or trading signal. |
 
 ## Limitations and next steps
 
-1. **ERCOT is ahead by 0.86 points.** Next: a challenger that tracks the current demand level (recency weighting, ratio target, linear trees), then combining with ERCOT's forecast, which is legal at 10:00.
+1. **ERCOT is ahead.** Level-tracking challengers didn't help on a monthly-retrained model; weather did. Next: live ECMWF scores (from about 6 Nov), cloud and solar features, and a verdict on the shadow-logged ERCOT stack (about 26 Nov).
 2. **Point forecasts only.** Next: quantile or conformal prediction intervals.
 3. **Short live record.** The backtest is honest but is not a track record; the dashboard accumulates one.
 4. **Day-ahead only.** Hour-ahead is a data-cost decision: the free GridStatus plan (250 requests/month) can't support hourly refreshes.

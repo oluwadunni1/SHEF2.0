@@ -280,11 +280,85 @@ Changes:
   The check also now alerts before it dispatches, so a failed catch-up can't be silent. A manual `{"action":"dispatch"}` started `daily` within seconds, and it correctly chose `skip` (06:50 Central, before the issue time).
 - CI now runs `cfn-lint` on `infra/`. It caught an unquoted `: ` in `api.yaml` before it reached a deploy.
 
-## 12. Still open
+## 12. First two live weeks and the P9 challengers (2026-10-28)
+
+**Live, 15–27 Oct (13 full days, 312 hours):** MAPE 3.22%, Peak-MAPE 2.48%, bias −2.3%. ERCOT on the same hours: 2.39%. Two days carry most of the error: 24 Oct (6.75%) and 27 Oct (7.33%), both explained in section 13.
+
+**Combining with ERCOT (fixed weights, no quota):**
+- A 50/50 average beat both inputs live (2.12%) but not ERCOT in the 120-day backtest (2.97% vs 2.79%).
+- Learned weights, walk-forward by month, settle near 0.31 × ours + 0.70 × ERCOT: 2.73% vs ERCOT's 2.78% in the backtest (a tie at the 0.10 margin), 2.15% live with Peak-MAPE 0.91%. An intercept or per-time-of-day weights overfit.
+
+**Recent-error correction:** subtract half the median error of the last 7 days that were known at the 09:00 cutoff.
+- On the fixed P3 holdout model: 3.79% → 3.56%, Peak 3.35% → 2.66%.
+- On a model retrained monthly (below): 3.53% → 3.53%. It was correcting staleness, not a lasting bias.
+
+**Both are shadow-logged daily** (`monitoring.challengers`, `sql/008`), frozen on 2026-10-28, never served. Only rows logged before their target day, from 29 Oct, count toward the verdict; the dashboard shows progress to 28 days.
+
+**Experiment harness** (`src/shef/models/harness.py`, `scripts/experiment.py`): every idea is one change to the champion recipe, scored on the three P3 folds and on a monthly rolling origin over Aug 2025 → Oct 2026 (retrain through month start − 8 days, predict the month). It passes only with rolling MAPE ≥ 0.10 points better, rolling Peak-MAPE no worse, and CV no more than 0.10 worse. A parity run reproduces the P3 holdout exactly (3.79% / 3.38% / 482 MW). Results: `data/reports/harness.json`, MLflow `shef2-harness`.
+
+| Monthly rolling origin, Aug 2025 → Oct 2026 | MAPE | Peak | CV MAPE | Verdict |
+|---|---|---|---|---|
+| P3 champion, trained once (the holdout) | 3.79% | 3.38% | | |
+| **Same recipe, retrained monthly (baseline)** | **3.54%** | **2.54%** | 4.18% | reference |
+| A2 predict the change from the freshest same-hour load | 3.81% | 2.85% | 4.51% | fails |
+| A3 linear leaves (`linear_lambda` 100; unregularised diverged) | 3.55% | 2.66% | 4.34% | fails |
+| A4 recency weights, half-life 2 years | 3.58% | 2.51% | 4.23% | fails |
+| B5 weights ∝ 1/load | 3.51% | 2.50% | 4.27% | fails |
+| B6 double weight on top-decile hours | 3.56% | 2.43% | 4.26% | fails |
+| D12 week-over-week load ratio | 3.50% | 2.43% | 4.20% | fails |
+| **C9a ECMWF IFS forecast weather instead of GFS** | **3.34%** | **2.30%** | fold 3: 4.19% → 4.00% | **passes** |
+
+- **Most of the record-demand problem (section 9) was staleness.** Retrained monthly, September 2026 drops from 4.74% to 3.13%. `promote.yml` already retrains monthly, and the live champion is trained through 2026-10-09.
+- **The level-tracking ideas add nothing on a fresh model.** The remaining error is weather.
+- **ECMWF passes on identical hours.** Better on 60% of 426 days; mean gain 0.20 points, 95% bootstrap CI [0.03, 0.37]. In CV fold 3 MAPE improves too (4.19% → 4.00%) but Peak-MAPE is slightly worse (3.36% → 3.47%). No retraining is needed: the model trains on ERA5.
+
+## 13. Served weather: live `gfs_seamless` was HRRR, the backtest was GFS (2026-10-28)
+
+**Archive check** (Previous Runs, San Antonio, day-1 temperature vs ERA5, Apr 2024 → Oct 2026, 22,369 hours):
+
+| Model | MAE | Bias | p95 | Hot hours (≥ 32 °C) MAE | Archived since |
+|---|---|---|---|---|---|
+| `gfs_seamless` (served until now) | 1.37 °C | −0.24 | 3.6 | 1.34 | temperature 2021-04 |
+| **`ecmwf_ifs025`** | **0.84 °C** | +0.18 | **2.6** | **0.73** | 2024-03 |
+| `icon_seamless` | 1.06 °C | +0.08 | 3.0 | 0.93 | 2024-02 |
+| Mean of GFS, ECMWF, ICON, GEM | 0.92 °C | −0.08 | 2.6 | 0.78 | |
+
+Error rises with disagreement between models: the four-model mean is 0.58 °C off in the quietest quartile of spread and 1.43 °C in the widest.
+
+**Why the two worst live days went wrong.** `gfs_seamless` is a splice. Open-Meteo serves NOAA's HRRR where HRRR has data and GFS global after that:
+
+| | leads ≤ 24 h (hours 00–08) | leads 25–38 h (hours 09–23, incl. the peak) |
+|---|---|---|
+| Backtest (Previous Runs `previous_day1` / `previous_day2`) | HRRR | **GFS global** |
+| Live at 10:00 CT | HRRR | **HRRR** (extended runs reach 48 h) |
+
+Checked both ways: archived `day1` matches `gfs_hrrr` exactly and `day2` matches `gfs_global` exactly; the live `gfs_seamless` forecast equals HRRR on 58 of 72 hours. So the P3 holdout scored the target day's afternoon on GFS global, while production was served HRRR at the end of its range. Section 4's E10 found `gfs_seamless` identical to `best_match`, which was true and did not reveal this.
+
+On 27 Oct HRRR forecast a 20–21 °C afternoon. It was 26–27 °C. The served-weather check (section 7) scores the snapshot at 2.72 °C MAE for that day, against 0.84 °C for ECMWF.
+
+**Counterfactual through the real serving path** (`build_live` + the v1 champion). Load is rebuilt from the logged actuals; load features match the served rows exactly (max difference 0.000 MW); only the weather changes:
+
+| Target day | Served (HRRR at 10:00) | GFS global day-1/2, as backtested | ECMWF day-1/2 |
+|---|---|---|---|
+| 24 Oct | 6.75% | 3.05% | **1.91%** |
+| 27 Oct | 7.33% | **1.21%** | 1.85% |
+
+(ECMWF here is the archived Previous Runs forecast, not a 10:00 fetch, so these are close estimates, not exact.)
+
+**Decision: serve `ecmwf_ifs025` from issue date 2026-10-29** (`SERVED_WEATHER_MODEL`, `SERVED_SINCE` in `serving/schema.py`).
+- ECMWF is one model at every lead, so live and backtest weather now come from the same model. Its 06z run is available at about 13:40 UTC, before the 15:00 UTC issue (16:00 in winter).
+- `gfs_seamless` stays in the daily snapshot as a shadow, scored against ERA5 as `gfs_seamless_vs_era5`. Each issue date records which model was served, so earlier GFS days are still scored as served.
+- No retraining: the model trains on ERA5. The request schema accepts only the served model, so a client sending GFS is refused.
+
+The lesson: **archiving exactly what was served found this.** The training proxy was right for the model it named, but the name meant a different model live.
+
+## 14. Still open
 
 - [ ] GridStatus publish latency p99: accumulating daily in `monitoring.load_latency` (section 10). Needs a few weeks before it can be called a p99.
 - [ ] 7 consecutive unattended `daily` runs (P5 definition of done). The first scheduled run is 2026-10-13 15:07 UTC.
 - [x] ~~A day when GitHub drops every cron slot opens no issue.~~ The 13:00 output check alerts by email (section 11).
-- [ ] Prediction intervals; a level-adaptive challenger for record-demand periods (README limitations).
+- [ ] Prediction intervals (README limitations).
+- [x] ~~A level-adaptive challenger for record-demand periods.~~ Monthly retraining fixes most of it; level-tracking ideas add nothing on a fresh model (section 12).
+- [ ] Live ECMWF scores vs ERA5 (from about 6 Nov), and the shadow challengers' 28-day verdicts (about 26 Nov).
 - [x] Confirm Open-Meteo `previous_day1` lead definition: predicted 24 h before valid time
-- [x] Weather model: `gfs_seamless` (identical to `best_match` in the archive; pinned for live parity)
+- [x] Weather model: `gfs_seamless` (identical to `best_match` in the archive; pinned for live parity). **Superseded 2026-10-28:** live it is HRRR at our leads; ECMWF is served from 2026-10-29 (section 13).
