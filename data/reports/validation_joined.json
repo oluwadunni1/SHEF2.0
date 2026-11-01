@@ -1,14 +1,14 @@
 {
   "stage": "joined",
   "schema": "joined",
-  "checked_at_utc": "2026-10-12T14:02:44+00:00",
-  "rows": 94485,
+  "checked_at_utc": "2026-11-01T13:41:18+00:00",
+  "rows": 94981,
   "passed": true,
   "failures": [],
   "warnings": [],
   "stats": {
     "first_ts_utc": "2016-01-01 00:00:00+00:00",
-    "last_ts_utc": "2026-10-11 20:00:00+00:00",
+    "last_ts_utc": "2026-11-01 12:00:00+00:00",
     "load_gaps": [
       {
         "after": "2016-03-16 03:00:00+00:00",
@@ -30,10 +30,10 @@
       "2026": 1.0
     },
     "temp_obs_missing_hours_older_than_7d": 0,
-    "temp_obs_last_valid_utc": "2026-10-11 20:00:00+00:00",
-    "temp_proxy_d1_completeness_since_start": 0.98989,
-    "temp_proxy_d2_completeness_since_start": 0.98893,
+    "temp_obs_last_valid_utc": "2026-11-01 12:00:00+00:00",
+    "temp_proxy_d1_completeness_since_start": 0.98999,
+    "temp_proxy_d2_completeness_since_start": 0.98904,
     "uri_hours": 264,
-    "dst_day_hours": 503
+    "dst_day_hours": 511
   }
 }
